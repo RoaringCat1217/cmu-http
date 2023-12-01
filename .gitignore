@@ -1,5 +1,7 @@
 # CLion Directories
 .vscode/
+.DS_Store
+.idea/
 
 # Object Files
 obj/

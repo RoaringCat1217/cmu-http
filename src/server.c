@@ -27,6 +27,7 @@
 
 #include "parse_http.h"
 #include "ports.h"
+#include "vector.h"
 
 #define BUF_SIZE 8192
 #define CONNECTION_TIMEOUT 50

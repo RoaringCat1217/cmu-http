@@ -1,16 +1,19 @@
 SRC_DIR := src
 BK_DIR := backend
 OBJ_DIR := obj
+UTILS_DIR := utils
 # all src files
 SRC := $(wildcard $(SRC_DIR)/*.c) $(wildcard $(BK_DIR)/*.c)
+# all utils files
+UTILS := $(wildcard $(UTILS_DIR)/*.c)
 # all objects
-OBJ := $(OBJ_DIR)/y.tab.o $(OBJ_DIR)/lex.yy.o $(OBJ_DIR)/parse_http.o
+OBJ := $(patsubst $(UTILS_DIR)/%.c,$(OBJ_DIR)/%.o,$(UTILS)) $(OBJ_DIR)/y.tab.o $(OBJ_DIR)/lex.yy.o $(OBJ_DIR)/parse_http.o
 # all binaries
 BIN := server client
 # C compiler
 CC  := gcc
 # C PreProcessor Flag
-CPPFLAGS := -Iinclude
+CPPFLAGS := -Iinclude -Iutils
 # compiler flags
 CFLAGS   := -g
 # DEPS = parse.h y.tab.h
@@ -32,10 +35,13 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(OBJ_DIR)
 $(OBJ_DIR)/%.o: $(BK_DIR)/%.c $(OBJ_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -Wunused-function -c $< -o $@
 
-server: $(OBJ_DIR)/y.tab.o $(OBJ_DIR)/lex.yy.o $(OBJ_DIR)/parse_http.o $(OBJ_DIR)/responses.o $(OBJ_DIR)/server.o
+$(OBJ_DIR)/%.o: $(UTILS_DIR)/%.c $(UTILS_DIR)/%.h $(OBJ_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -Wunused-function -c $< -o $@
+
+server: $(patsubst $(UTILS_DIR)/%.c,$(OBJ_DIR)/%.o,$(UTILS)) $(OBJ_DIR)/y.tab.o $(OBJ_DIR)/lex.yy.o $(OBJ_DIR)/parse_http.o $(OBJ_DIR)/responses.o $(OBJ_DIR)/server.o
 	$(CC) -Werror $^ -o $@
 
-client: $(OBJ_DIR)/y.tab.o $(OBJ_DIR)/lex.yy.o $(OBJ_DIR)/parse_http.o $(OBJ_DIR)/responses.o $(OBJ_DIR)/client.o
+client: $(patsubst $(UTILS_DIR)/%.c,$(OBJ_DIR)/%.o,$(UTILS)) $(OBJ_DIR)/y.tab.o $(OBJ_DIR)/lex.yy.o $(OBJ_DIR)/parse_http.o $(OBJ_DIR)/responses.o $(OBJ_DIR)/client.o
 	$(CC) -Werror $^ -o $@
 
 $(OBJ_DIR):
