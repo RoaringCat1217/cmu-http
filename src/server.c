@@ -27,8 +27,9 @@
 
 #include "parse_http.h"
 #include "ports.h"
-#include "vector.h"
+#include "fileset.h"
 
+#define MAX_LINE 1024
 #define BUF_SIZE 8192
 #define CONNECTION_TIMEOUT 50
 
@@ -45,6 +46,24 @@ int main(int argc, char *argv[]) {
     if (www_dir == NULL) {
         fprintf(stderr, "Unable to open www folder %s.\n", www_folder);
         return EXIT_FAILURE;
+    }
+
+    // open all files and store their fds in fileset
+    fileset_t fileset;
+    fileset_init(&fileset);
+    char path_to_file[MAX_LINE];
+    strcpy(path_to_file, www_folder);
+    size_t len = strlen(path_to_file);
+    // make sure it ends with /
+    if (path_to_file[len - 1] != '/') {
+        path_to_file[len] = '/';
+        len++;
+        path_to_file[len] = '\0';
+    }
+    struct dirent * entry;
+    while ((entry = readdir(www_dir)) != NULL) {
+        strcpy(path_to_file + len, entry->d_name);
+        fileset_insert(&fileset, path_to_file);
     }
     closedir(www_dir);
 
