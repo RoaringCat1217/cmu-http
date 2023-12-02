@@ -3,14 +3,6 @@
 
 /* Client/server helper functions - stolen from 15513 Proxy Lab */
 
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <errno.h>
-#include <sys/socket.h> /* struct sockaddr */
-#include <sys/types.h>  /* struct sockaddr */
-#include <netdb.h>      /* freeaddrinfo() */
-
 #define LISTENQ 1024 /* Second argument to listen() */
 
 /*

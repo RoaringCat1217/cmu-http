@@ -1,5 +1,10 @@
 #include "vector.h"
 
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
 void vector_init(vector_t *vector) {
     vector->capacity = VECTOR_INIT_CAPACITY;
     vector->size = 0;

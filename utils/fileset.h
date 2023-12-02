@@ -1,13 +1,7 @@
 #ifndef FILESET_H
 #define FILESET_H
 
-#include <stdio.h>
-#include <unistd.h>
 #include <stdbool.h>
-#include <stdint.h>
-#include <string.h>
-#include <fcntl.h>
-#include <stdlib.h>
 
 #define N_BUCKETS 256
 

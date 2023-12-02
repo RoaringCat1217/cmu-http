@@ -1,10 +1,8 @@
 #ifndef VECTOR_H
 #define VECTOR_H
 
-#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
 
 #define VECTOR_INIT_CAPACITY 16;
 

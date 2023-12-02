@@ -4,11 +4,6 @@
 /* Robust I/O (Rio) package - stolen from 15513 Proxy Lab */
 
 #include <stdlib.h>
-#include <unistd.h>
-#include <stdint.h>
-#include <errno.h>
-#include <string.h>
-
 
 /* Persistent state for the robust I/O (Rio) package */
 #define RIO_BUFSIZE 8192

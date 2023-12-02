@@ -1,5 +1,12 @@
-#include "net_helper.h"
+#include <errno.h>
+#include <netdb.h> /* freeaddrinfo() */
+#include <stdio.h>
+#include <string.h>
+#include <sys/socket.h> /* struct sockaddr */
+#include <sys/types.h>  /* struct sockaddr */
+#include <unistd.h>
 
+#include "net_helper.h"
 
 int open_clientfd(const char *hostname, const char *port) {
     int clientfd = -1, rc;
