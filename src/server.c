@@ -32,16 +32,26 @@
 #include "parse_http.h"
 #include "ports.h"
 
-#include <nonblocking_io.h>
+#include "nonblocking_io.h"
 
 #define MAX_LINE 1024
 #define BUF_SIZE 8192
 #define CONNECTION_TIMEOUT 50
 #define MAX_CONNECTION 100
 
-struct pollfd fds[MAX_CONNECTION];
+struct pollfd fds[MAX_CONNECTION + 1];
+int conncount = 0;
 
-int setnoblock(int fd);
+typedef struct {
+    nio_t nio;
+    int progress;
+} routine_data_t;
+
+void routine(routine_data_t *routine_data) {
+    if (routine_data->progress == 0) {
+
+    }
+}
 
 int main(int argc, char *argv[]) {
     /* Validate and parse args */
@@ -89,7 +99,6 @@ int main(int argc, char *argv[]) {
     fds[0].fd = listenfd;
     fds[0].events = POLLIN | POLLERR;
     fds[0].revents = 0;
-    int conncount = 0;
 
     // Signal(SIGPIPE, sigpipe_handler);
 
@@ -110,6 +119,7 @@ int main(int argc, char *argv[]) {
                 close(fd);
                 printf("delete connection: %d\n", fd);
             } else if ((fds[i].fd == listenfd) && (fds[i].revents & POLLIN)) {
+                // accept and initialize a new routine
                 struct sockaddr_in client;
                 socklen_t lenaddr = sizeof(client);
                 int conn = -1;
@@ -122,10 +132,17 @@ int main(int argc, char *argv[]) {
                 printf("get connection %d from %s:%d\n", conn,
                        inet_ntoa(client.sin_addr), client.sin_port);
                 conncount++;
-                setnoblock(conn);
                 fds[conncount].fd = conn;
                 fds[conncount].events = POLLIN | POLLHUP | POLLERR;
                 fds[conncount].revents = 0;
+
+                // allocate space for a new routine_data
+                routine_data_t *routine_data = malloc(sizeof(routine_data_t));
+                routine_data->progress = 0;
+                nio_init(&routine_data->nio, fds[conncount].fd);
+            } else {
+
+
             }
         }
     }
