@@ -18,6 +18,15 @@ void vector_push_back(vector_t *vector, const uint8_t *data, size_t size) {
     vector->size += size;
 }
 
+void vector_pop_front(vector_t *vector, size_t size) {
+    if (size > vector->size)
+        size = vector->size;
+    int i = (int)size, j = 0;
+    for (; i < vector->size; i++, j++)
+        vector->data[j] = vector->data[i];
+    vector->size -= size;
+}
+
 void vector_clear(vector_t *vector) {
     vector->size = 0;
     vector->capacity = VECTOR_INIT_CAPACITY;
