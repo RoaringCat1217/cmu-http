@@ -47,11 +47,7 @@ typedef struct {
     int progress;
 } routine_data_t;
 
-void routine(routine_data_t *routine_data) {
-    if (routine_data->progress == 0) {
-
-    }
-}
+void routine(routine_data_t *routine_data);
 
 int main(int argc, char *argv[]) {
     /* Validate and parse args */
@@ -140,10 +136,17 @@ int main(int argc, char *argv[]) {
                 routine_data_t *routine_data = malloc(sizeof(routine_data_t));
                 routine_data->progress = 0;
                 nio_init(&routine_data->nio, fds[conncount].fd);
-            } else {
+            } else if (fds[i].revents & POLLIN) {
 
+            } else if (fds[i].revents & POLLOUT) {
 
             }
+
+            // determine write buffer is empty or not
+            // if empty, fds[i].events &= (~POLLIN);
+            //           fds[i].events |= POLLOUT;
+            // if not empty, fds[i].events &= (~POLLIN);
+            //               fds[i].events |= POLLOUT;
         }
     }
 
