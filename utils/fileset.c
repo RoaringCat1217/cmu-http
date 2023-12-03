@@ -33,8 +33,9 @@ void fileset_init(fileset_t *fileset) {
         fileset->buckets[i] = NULL;
 }
 
-bool fileset_insert(fileset_t *fileset, const char *filename) {
-    int fd = open(filename, O_RDONLY);
+bool fileset_insert(fileset_t *fileset, const char *filename,
+                    const char *path_to_file) {
+    int fd = open(path_to_file, O_RDONLY);
     if (fd < 0)
         return false;
     file_entry_t *new_entry = malloc(sizeof(file_entry_t));
