@@ -250,7 +250,7 @@ int main(int argc, char *argv[]) {
     fds[0].revents = 0;
 
     while (1) {
-        int ret = poll(fds, conncount + 1, -1);
+        int ret = poll(fds, conncount + 1, CONNECTION_TIMEOUT);
         if (ret < 0) {
             fprintf(stderr, "poll: %d, %s\n", errno, strerror(errno));
             exit(1);
