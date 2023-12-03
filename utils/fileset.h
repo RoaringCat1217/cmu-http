@@ -14,13 +14,12 @@ typedef struct file_entry {
 
 typedef struct {
     file_entry_t *buckets[N_BUCKETS];
-    char path[MAX_LINE];
+    char root[MAX_LINE];
     size_t size;
 } fileset_t;
 
-void fileset_init(fileset_t *fileset);
-bool fileset_insert(fileset_t *fileset, const char *filename,
-                    const char *path_to_file);
+void fileset_init(fileset_t *fileset, char *root);
+bool fileset_insert(fileset_t *fileset, const char *filename);
 int fileset_find(fileset_t *fileset, const char *filename);
 void fileset_free(fileset_t *fileset);
 

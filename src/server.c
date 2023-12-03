@@ -59,6 +59,7 @@ routine_data_t routine_data_arr[MAX_CONNECTION + 1];
 fileset_t fileset;
 
 int routine(routine_data_t *routine_data);
+void add_files_in_folder(char *www_folder, char *prev_path);
 void write_http_400(nio_t *nio);
 void write_http_404(nio_t *nio);
 void write_http_503(nio_t *nio, bool instant);
@@ -136,7 +137,8 @@ int routine(routine_data_t *routine_data) {
                     vector_clear(&routine_data->req_buf);
                     routine_data->state = 2;
                     continue;
-                } else {
+                } else if (strcmp(routine_data->request.http_method, POST) ==
+                           0) {
                     // POST, need to receive body
                     char content_length[4096];
                     if (get_header_value(routine_data->request,
@@ -150,6 +152,11 @@ int routine(routine_data_t *routine_data) {
                         routine_data->nleft = atoi(content_length);
                         routine_data->state = 4;
                     }
+                    continue;
+                } else {
+                    serve((char *)routine_data->req_buf.data,
+                          routine_data->req_buf.size, &routine_data->nio);
+                    routine_data->state = 1;
                     continue;
                 }
             }
@@ -169,7 +176,9 @@ int routine(routine_data_t *routine_data) {
             }
             if (nread == NOT_READY)
                 return YIELD;
+
             routine_data->nleft -= nread;
+            printf("%zu\n", routine_data->nleft);
             if (routine_data->nleft > 0)
                 return YIELD;
             // received all the body
@@ -198,27 +207,25 @@ int main(int argc, char *argv[]) {
     }
 
     // open all files and store their fds in fileset
-    fileset_init(&fileset);
-    char path_to_file[MAX_LINE];
+    fileset_init(&fileset, www_folder);
+
     char file_name[MAX_LINE];
-    strcpy(path_to_file, www_folder);
-    size_t len = strlen(path_to_file);
-    // make sure it ends with /
-    if (path_to_file[len - 1] != '/') {
-        path_to_file[len] = '/';
-        len++;
-        path_to_file[len] = '\0';
-    }
+    char prev_path[MAX_LINE] = "/";
+
     struct dirent *entry;
     while ((entry = readdir(www_dir)) != NULL) {
         if (strcmp(".", entry->d_name) == 0 ||
             strcmp("..", entry->d_name) == 0) {
             continue;
         }
-        strcpy(path_to_file + len, entry->d_name);
-        file_name[0] = '/';
-        strcpy(file_name + 1, entry->d_name);
-        fileset_insert(&fileset, file_name, path_to_file);
+
+        if (entry->d_type == DT_DIR) {
+            add_files_in_folder(entry->d_name, prev_path);
+        } else {
+            file_name[0] = '/';
+            strcpy(file_name + 1, entry->d_name);
+            fileset_insert(&fileset, file_name);
+        }
     }
     closedir(www_dir);
 
@@ -325,6 +332,48 @@ int main(int argc, char *argv[]) {
     return EXIT_SUCCESS;
 }
 
+void add_files_in_folder(char *www_folder, char *prev_path) {
+    char folder_path[MAX_LINE];
+    strcpy(folder_path, fileset.root);
+    size_t folder_path_len = strlen(folder_path);
+    strcpy(folder_path + folder_path_len, prev_path);
+    folder_path_len = strlen(folder_path);
+    strcpy(folder_path + folder_path_len, www_folder);
+
+    DIR *www_dir = opendir(folder_path);
+    if (www_dir == NULL) {
+        fprintf(stderr, "Unable to open www folder %s.\n", folder_path);
+        exit(EXIT_FAILURE);
+    }
+
+    char file_name[MAX_LINE];
+    strcpy(file_name, prev_path);
+    size_t file_len = strlen(file_name);
+    strcpy(file_name + file_len, www_folder);
+    file_len = strlen(file_name);
+
+    size_t prev_path_len = strlen(prev_path);
+    prev_path[prev_path_len++] = '/';
+    strcpy(prev_path + prev_path_len, www_folder);
+
+    struct dirent *entry;
+    while ((entry = readdir(www_dir)) != NULL) {
+        if (strcmp(".", entry->d_name) == 0 ||
+            strcmp("..", entry->d_name) == 0) {
+            continue;
+        }
+
+        if (entry->d_type == DT_DIR) {
+            add_files_in_folder(entry->d_name, prev_path);
+        } else {
+            file_name[file_len] = '/';
+            strcpy(file_name + 1 + file_len, entry->d_name);
+            fileset_insert(&fileset, file_name);
+        }
+    }
+    closedir(www_dir);
+}
+
 void write_http_400(nio_t *nio) {
     char *msg;
     size_t len;
@@ -364,7 +413,7 @@ void write_http_503(nio_t *nio, bool instant) {
 
 int get_header_value(Request request, char *header_name, char *header_value) {
     for (int i = 0; i < request.header_count; i++) {
-        if (strcmp(request.headers[i].header_name, header_name)) {
+        if (strcmp(request.headers[i].header_name, header_name) == 0) {
             strcpy(header_value, request.headers[i].header_value);
             return 0;
         }
@@ -389,6 +438,10 @@ void serve(char *buf, size_t size, nio_t *nio) {
     test_error_code_t error_code = parse_http_request(buf, size, &request);
 
     if (error_code == TEST_ERROR_NONE && request.valid) {
+        if (strcmp(request.http_version, HTTP_VER) != 0) {
+            write_http_400(nio);
+            return;
+        }
         if (strcmp(request.http_method, GET) == 0 ||
             strcmp(request.http_method, HEAD) == 0) {
             printf("%s\n", request.http_uri);
@@ -446,10 +499,13 @@ void serve(char *buf, size_t size, nio_t *nio) {
             } else {
                 nio_writeb_pushback(nio, (uint8_t *)buf, size);
             }
+        } else {
+            write_http_400(nio);
+            return;
         }
-        char connection_status[MAX_LINE];
-        get_header_value(request, "connection", connection_status);
-        if (strcpy(connection_status, "close") == 0) {
+        char header_val[MAX_LINE];
+        get_header_value(request, "connection", header_val);
+        if (strcpy(header_val, "close") == 0) {
             nio->rclosed = true;
         }
     } else {

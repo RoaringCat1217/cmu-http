@@ -27,14 +27,19 @@ static uint64_t hash(const char *string) {
     return result;
 }
 
-void fileset_init(fileset_t *fileset) {
+void fileset_init(fileset_t *fileset, char *root) {
     fileset->size = 0;
+    strcpy(fileset->root, root);
     for (int i = 0; i < N_BUCKETS; i++)
         fileset->buckets[i] = NULL;
 }
 
-bool fileset_insert(fileset_t *fileset, const char *filename,
-                    const char *path_to_file) {
+bool fileset_insert(fileset_t *fileset, const char *filename) {
+    char path_to_file[MAX_LINE];
+    strcpy(path_to_file, fileset->root);
+    size_t len = strlen(path_to_file);
+    strcpy(path_to_file + len, filename);
+
     int fd = open(path_to_file, O_RDONLY);
     if (fd < 0)
         return false;
