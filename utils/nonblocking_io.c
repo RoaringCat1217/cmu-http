@@ -81,12 +81,15 @@ ssize_t nio_readline(nio_t *nio, vector_t *line) {
 }
 
 ssize_t nio_writeb(nio_t *nio, const uint8_t *usrbuf, size_t size) {
-    if (usrbuf != NULL && size > 0)
+    if (usrbuf != NULL && size > 0) {
         vector_push_back(&nio->wbuf, usrbuf, size);
+    }
     while (nio->wbuf.size > 0) {
         ssize_t nwrite = write(nio->fd, nio->wbuf.data, nio->wbuf.size);
-        if (nwrite >= 0)
+        if (nwrite >= 0) {
+            vector_pop_front(&nio->wbuf, nwrite);
             return nwrite;
+        }
         if (nwrite == -1) {
             if (errno == EINTR)
                 continue;

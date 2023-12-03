@@ -128,8 +128,8 @@ int routine(routine_data_t *routine_data) {
                     routine_data->state = 1;
                     continue;
                 }
-                if (strcmp(routine_data->request.http_method, "GET") == 0 ||
-                    strcmp(routine_data->request.http_method, "HEAD") == 0) {
+                if (strcmp(routine_data->request.http_method, GET) == 0 ||
+                    strcmp(routine_data->request.http_method, HEAD) == 0) {
                     // do not need to receive body, serve the client
                     serve((char *)routine_data->req_buf.data,
                           routine_data->req_buf.size, &routine_data->nio);
@@ -257,6 +257,7 @@ int main(int argc, char *argv[]) {
             if (fds[i].revents & POLLHUP || fds[i].revents & POLLERR) {
                 int fd = fds[i].fd;
                 fds[i] = fds[conncount];
+                routine_data_arr[i] = routine_data_arr[conncount];
                 i--;
                 conncount--;
                 close(fd);
@@ -298,22 +299,25 @@ int main(int argc, char *argv[]) {
                 nio_writeb(&routine_data_arr[i].nio, NULL, 0);
             }
 
-            if (routine_data_arr[conncount].nio.rclosed &&
-                routine_data_arr[conncount].nio.wbuf.size == 0) {
-                int fd = fds[i].fd;
-                fds[i] = fds[conncount];
-                i--;
-                conncount--;
-                close(fd);
-                printf("delete connection: %d\n", fd);
-            } else if (routine_data_arr[conncount].nio.wbuf.size == 0) {
-                // continue to read data
-                fds[i].events &= (~POLLOUT);
-                fds[i].events |= POLLIN;
-            } else if (routine_data_arr[conncount].nio.wbuf.size > 0) {
-                // continue to write data
-                fds[i].events &= (~POLLIN);
-                fds[i].events |= POLLOUT;
+            if (fds[i].fd != listenfd) {
+                if (routine_data_arr[i].nio.rclosed &&
+                    routine_data_arr[i].nio.wbuf.size == 0) {
+                    int fd = fds[i].fd;
+                    fds[i] = fds[conncount];
+                    routine_data_arr[i] = routine_data_arr[conncount];
+                    i--;
+                    conncount--;
+                    close(fd);
+                    printf("delete connection - 2: %d\n", fd);
+                } else if (routine_data_arr[i].nio.wbuf.size == 0) {
+                    // continue to read data
+                    fds[i].events &= (~POLLOUT);
+                    fds[i].events |= POLLIN;
+                } else if (routine_data_arr[i].nio.wbuf.size > 0) {
+                    // continue to write data
+                    fds[i].events &= (~POLLIN);
+                    fds[i].events |= POLLOUT;
+                }
             }
         }
     }
