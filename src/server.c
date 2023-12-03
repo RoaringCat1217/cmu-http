@@ -176,7 +176,6 @@ int routine(routine_data_t *routine_data) {
             if (nread == NOT_READY)
                 return YIELD;
             routine_data->nleft -= nread;
-            printf("%zu\n", routine_data->nleft);
             if (routine_data->nleft > 0)
                 continue;
             // received all the body
@@ -391,78 +390,77 @@ void serve(char *buf, size_t size, nio_t *nio) {
     if (error_code == TEST_ERROR_NONE && request.valid) {
         if (strcmp(request.http_version, HTTP_VER) != 0) {
             write_http_400(nio);
-            return;
-        }
-        if (strcmp(request.http_method, GET) == 0 ||
-            strcmp(request.http_method, HEAD) == 0) {
-            size_t uri_len = strlen(request.http_uri);
-            if (request.http_uri[uri_len - 1] == '/') {
-                strcpy(request.http_uri + uri_len, "index.html");
-            }
-            int file_fd = fileset_find(&fileset, request.http_uri);
-            if (file_fd == -1) {
-                char file_path[MAX_LINE];
-                sprintf(file_path, "%s%s", fileset.root, request.http_uri);
-                file_fd = open(file_path, O_RDONLY);
-                if (file_fd > 0) {
-                    fileset_insert(&fileset, request.http_uri, file_path);
-                }
-            }
-
-            if (file_fd < 0) {
-                // file not found
-                write_http_404(nio);
-                return;
-            } else {
-                if (strcmp(request.http_method, GET) == 0) {
-                    // get file length
-                    int file_len = lseek(file_fd, 0, SEEK_END);
-                    // get mapping
-                    char *addr = mmap(NULL, file_len, PROT_READ, MAP_PRIVATE,
-                                      file_fd, 0);
-                    char *data = malloc(file_len); // data stores file content
-                    memcpy(data, addr, file_len);  // copy file content
-
-                    munmap(addr, file_len);
-
-                    char *msg;
-                    size_t len;
-                    char content_len[MAX_LINE];
-                    sprintf(content_len, "%d", file_len);
-
-                    if (serialize_http_response(&msg, &len, OK, NULL,
-                                                content_len, NULL, file_len,
-                                                data) == TEST_ERROR_NONE) {
-                        nio_writeb_pushback(nio, (uint8_t *)msg, len);
-                        free(msg);
-                    }
-                    free(data);
-                } else {
-                    char *msg;
-                    size_t len;
-
-                    if (serialize_http_response(&msg, &len, OK, NULL, NULL,
-                                                NULL, 0,
-                                                NULL) == TEST_ERROR_NONE) {
-                        nio_writeb_pushback(nio, (uint8_t *)msg, len);
-                        free(msg);
-                    }
-                }
-            }
-        } else if (strcmp(request.http_method, POST) == 0) {
-            char content_length[4096];
-            int err =
-                get_header_value(request, "Content-Length", content_length);
-            if (err == -1) {
-                // if a post request doesn't contain content-length
-                write_http_400(nio);
-                return;
-            } else {
-                nio_writeb_pushback(nio, (uint8_t *)buf, size);
-            }
         } else {
-            write_http_400(nio);
-            return;
+            if (strcmp(request.http_method, GET) == 0 ||
+                strcmp(request.http_method, HEAD) == 0) {
+                size_t uri_len = strlen(request.http_uri);
+                if (request.http_uri[uri_len - 1] == '/') {
+                    strcpy(request.http_uri + uri_len, "index.html");
+                }
+                int file_fd = fileset_find(&fileset, request.http_uri);
+                if (file_fd == -1) {
+                    char file_path[MAX_LINE];
+                    sprintf(file_path, "%s%s", fileset.root, request.http_uri);
+                    file_fd = open(file_path, O_RDONLY);
+                    if (file_fd > 0) {
+                        fileset_insert(&fileset, request.http_uri, file_path);
+                    }
+                }
+
+                if (file_fd < 0) {
+                    // file not found
+                    write_http_404(nio);
+                    return;
+                } else {
+                    if (strcmp(request.http_method, GET) == 0) {
+                        // get file length
+                        int file_len = lseek(file_fd, 0, SEEK_END);
+                        // get mapping
+                        char *addr = mmap(NULL, file_len, PROT_READ,
+                                          MAP_PRIVATE, file_fd, 0);
+                        char *data =
+                            malloc(file_len); // data stores file content
+                        memcpy(data, addr, file_len); // copy file content
+
+                        munmap(addr, file_len);
+
+                        char *msg;
+                        size_t len;
+                        char content_len[MAX_LINE];
+                        sprintf(content_len, "%d", file_len);
+
+                        if (serialize_http_response(&msg, &len, OK, NULL,
+                                                    content_len, NULL, file_len,
+                                                    data) == TEST_ERROR_NONE) {
+                            nio_writeb_pushback(nio, (uint8_t *)msg, len);
+                            free(msg);
+                        }
+                        free(data);
+                    } else {
+                        char *msg;
+                        size_t len;
+
+                        if (serialize_http_response(&msg, &len, OK, NULL, NULL,
+                                                    NULL, 0,
+                                                    NULL) == TEST_ERROR_NONE) {
+                            nio_writeb_pushback(nio, (uint8_t *)msg, len);
+                            free(msg);
+                        }
+                    }
+                }
+            } else if (strcmp(request.http_method, POST) == 0) {
+                char content_length[4096];
+                int err =
+                    get_header_value(request, "Content-Length", content_length);
+                if (err == -1) {
+                    // if a post request doesn't contain content-length
+                    write_http_400(nio);
+                } else {
+                    nio_writeb_pushback(nio, (uint8_t *)buf, size);
+                }
+            } else {
+                write_http_400(nio);
+            }
         }
         char connection_status[MAX_LINE];
         get_header_value(request, CONNECTION_STR, connection_status);
@@ -473,6 +471,7 @@ void serve(char *buf, size_t size, nio_t *nio) {
     } else {
         // parse error
         write_http_400(nio);
+        nio->rclosed = true;
         return;
     }
 }
