@@ -70,6 +70,7 @@ int routine(routine_data_t *routine_data) {
     while (true) {
         if (routine_data->state == 0) {
             // initialize routine_data
+            printf("routine: entered state 0\n");
             vector_init(&routine_data->req_buf);
             routine_data->request.body = NULL;
             routine_data->request.headers = NULL;
@@ -79,16 +80,19 @@ int routine(routine_data_t *routine_data) {
 
         if (routine_data->state == 1) {
             // free routine_data, and return
+            printf("routine: entered state 1\n");
             vector_free(&routine_data->req_buf);
             if (routine_data->request.body != NULL)
                 free(routine_data->request.body);
             if (routine_data->request.headers != NULL)
                 free(routine_data->request.headers);
+            printf("routine: finished\n");
             return FINISH;
         }
 
         if (routine_data->state == 2) {
             // read request header line
+            printf("routine: entered state 2\n");
             ssize_t nread =
                 nio_readline(&routine_data->nio, &routine_data->req_buf);
             if (nread == 0) {
@@ -105,8 +109,8 @@ int routine(routine_data_t *routine_data) {
         }
 
         if (routine_data->state == 3) {
-            printf("33333\n");
             // read headers and parse headers
+            printf("routine: entered state 3\n");
             ssize_t nread =
                 nio_readline(&routine_data->nio, &routine_data->req_buf);
             if (nread == 0) {
@@ -161,6 +165,7 @@ int routine(routine_data_t *routine_data) {
 
         if (routine_data->state == 4) {
             // read data for body
+            printf("routine: entered state 4\n");
             ssize_t nread =
                 nio_readb(&routine_data->nio, &routine_data->req_buf,
                           routine_data->nleft);
@@ -244,17 +249,16 @@ int main(int argc, char *argv[]) {
             exit(1);
         }
 
-        for (int i = 0; i < conncount + 1; i++) {
+        int tail = conncount;
+        for (int i = 0; i <= tail; i++) {
             // handle client drop
             if ((fds[i].revents & POLLERR)) {
-                printf("%d\n", fds[i].revents & POLLHUP);
-                printf("%d\n", fds[i].revents & POLLERR);
                 int fd = fds[i].fd;
-                fds[i] = fds[conncount];
-                routine_data_arr[i] = routine_data_arr[conncount];
-                i--;
-                conncount--;
+                nio_free(&routine_data_arr[i].nio);
+                vector_free(&routine_data_arr[i].req_buf);
+                fds[i].fd = -1; // mark as deleted
                 close(fd);
+                conncount--;
                 printf("delete connection: %d\n", fd);
             } else if ((fds[i].fd == listenfd) && (fds[i].revents & POLLIN)) {
                 // accept and initialize a new routine
@@ -275,18 +279,20 @@ int main(int argc, char *argv[]) {
                     nio_t nio;
                     nio_init(&nio, conn);
                     write_http_503(&nio, true);
+                    nio_free(&nio);
                     close(conn);
                 } else {
                     conncount++;
-                    fds[conncount].fd = conn;
-                    fds[conncount].events = POLLIN | POLLHUP | POLLERR;
-                    fds[conncount].revents = 0;
+                    tail++;
+                    fds[tail].fd = conn;
+                    fds[tail].events = POLLIN | POLLHUP | POLLERR;
+                    fds[tail].revents = 0;
 
                     // allocate space for a new routine_data
-                    routine_data_arr[conncount].state = 0;
-                    nio_init(&routine_data_arr[conncount].nio,
-                             fds[conncount].fd);
-                    // routine(&routine_data_arr[i]);
+                    routine_data_arr[tail].state = 0;
+                    nio_init(&routine_data_arr[tail].nio,
+                             fds[tail].fd);
+                    routine(&routine_data_arr[tail]);
                 }
             } else if (fds[i].revents & POLLIN) {
                 routine(&routine_data_arr[i]);
@@ -298,12 +304,12 @@ int main(int argc, char *argv[]) {
                 if (routine_data_arr[i].nio.rclosed &&
                     routine_data_arr[i].nio.wbuf.size == 0) {
                     int fd = fds[i].fd;
-                    fds[i] = fds[conncount];
-                    routine_data_arr[i] = routine_data_arr[conncount];
-                    i--;
-                    conncount--;
+                    nio_free(&routine_data_arr[i].nio);
+                    vector_free(&routine_data_arr[i].req_buf);
+                    fds[i].fd = -1; // mark as deleted
                     close(fd);
-                    printf("delete connection - 2: %d\n", fd);
+                    conncount--;
+                    printf("delete connection: %d\n", fd);
                 } else if (routine_data_arr[i].nio.wbuf.size == 0) {
                     // continue to read data
                     fds[i].events &= (~POLLOUT);
@@ -312,7 +318,22 @@ int main(int argc, char *argv[]) {
                     // continue to write data
                     fds[i].events &= (~POLLIN);
                     fds[i].events |= POLLOUT;
+                } else {
+                    fds[i].events |= POLLIN;
+                    fds[i].events |= POLLOUT;
                 }
+            }
+        }
+
+        // remove deleted fds[i] struct
+        int j = 1;
+        for (int i = 1; i <= tail; i++) {
+            if (fds[i].fd != -1) {
+                if (i != j) {
+                    fds[j] = fds[i];
+                    routine_data_arr[j] = routine_data_arr[i];
+                }
+                j++;
             }
         }
     }
@@ -326,7 +347,7 @@ void write_http_400(nio_t *nio) {
 
     if (serialize_http_response(&msg, &len, BAD_REQUEST, NULL, NULL, NULL, 0,
                                 NULL) == TEST_ERROR_NONE) {
-        nio_writeb_pushback(nio, (uint8_t *)msg, len);
+        nio_writeb(nio, (uint8_t *)msg, len);
         free(msg);
     }
 }
@@ -338,7 +359,7 @@ void write_http_404(nio_t *nio) {
 
     if (serialize_http_response(&msg, &len, NOT_FOUND, NULL, NULL, NULL, 0,
                                 NULL) == TEST_ERROR_NONE) {
-        nio_writeb_pushback(nio, (uint8_t *)msg, len);
+        nio_writeb(nio, (uint8_t *)msg, len);
         free(msg);
     }
 }
@@ -353,7 +374,7 @@ void write_http_503(nio_t *nio, bool instant) {
         if (instant) {
             nio_writeb(nio, (uint8_t *)msg, len);
         } else {
-            nio_writeb_pushback(nio, (uint8_t *)msg, len);
+            nio_writeb(nio, (uint8_t *)msg, len);
         }
         free(msg);
     }
@@ -432,7 +453,7 @@ void serve(char *buf, size_t size, nio_t *nio) {
                         if (serialize_http_response(&msg, &len, OK, NULL,
                                                     content_len, NULL, file_len,
                                                     data) == TEST_ERROR_NONE) {
-                            nio_writeb_pushback(nio, (uint8_t *)msg, len);
+                            nio_writeb(nio, (uint8_t *)msg, len);
                             free(msg);
                         }
                         free(data);
@@ -443,7 +464,7 @@ void serve(char *buf, size_t size, nio_t *nio) {
                         if (serialize_http_response(&msg, &len, OK, NULL, NULL,
                                                     NULL, 0,
                                                     NULL) == TEST_ERROR_NONE) {
-                            nio_writeb_pushback(nio, (uint8_t *)msg, len);
+                            nio_writeb(nio, (uint8_t *)msg, len);
                             free(msg);
                         }
                     }
@@ -456,7 +477,7 @@ void serve(char *buf, size_t size, nio_t *nio) {
                     // if a post request doesn't contain content-length
                     write_http_400(nio);
                 } else {
-                    nio_writeb_pushback(nio, (uint8_t *)buf, size);
+                    nio_writeb(nio, (uint8_t *)buf, size);
                 }
             } else {
                 write_http_400(nio);
