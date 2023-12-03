@@ -67,12 +67,6 @@ int get_header_value(Request *request, char *header_name, char *header_value);
 test_error_code_t parse_header(char *buf, size_t size, Request *request);
 void serve(routine_data_t *routine_data);
 
-bool need_to_close(Request *request) {
-    char connection_status[MAX_LINE];
-    get_header_value(request, CONNECTION_STR, connection_status);
-    return strncasecmp(connection_status, CLOSE, strlen(CLOSE)) == 0;
-}
-
 int routine(routine_data_t *routine_data) {
     while (true) {
         if (routine_data->state == 0) {
@@ -195,7 +189,7 @@ int routine(routine_data_t *routine_data) {
                 } else {
                     // unknown method
                     serve(routine_data);
-                    if (need_to_close(&routine_data->request)) {
+                    if (routine_data->close_conn) {
                         routine_data->state = 1;
                         continue;
                     } else {
@@ -225,7 +219,7 @@ int routine(routine_data_t *routine_data) {
                 continue;
             // received all the body
             serve(routine_data);
-            if (need_to_close(&routine_data->request)) {
+            if (routine_data->close_conn) {
                 routine_data->state = 1;
                 continue;
             } else {
