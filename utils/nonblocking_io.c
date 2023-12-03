@@ -25,7 +25,9 @@ ssize_t nio_read(nio_t *nio) {
     uint8_t buf[BUF_SIZE];
     ssize_t nread = 0, tot = 0;
     while (true) {
+        printf("read begin\n");
         nread = read(nio->fd, buf, BUF_SIZE);
+        printf("nread: %zd\n", nread);
         if (nread > 0) {
             vector_push_back(&nio->rbuf, buf, nread);
             tot += nread;
@@ -64,7 +66,9 @@ ssize_t nio_readb(nio_t *nio, vector_t *usrbuf, ssize_t n) {
 }
 
 ssize_t nio_readline(nio_t *nio, vector_t *line) {
+    printf("nio read enter\n");
     ssize_t nread = nio_read(nio);
+    printf("nio read returned: %ld\n", nread);
     int i = 0;
     for (; i < nio->rbuf.size; i++)
         if (nio->rbuf.data[i] == '\n')

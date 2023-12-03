@@ -102,10 +102,10 @@ int routine(routine_data_t *routine_data) {
                 return YIELD;
 
             routine_data->state = 3;
-            continue;
         }
 
         if (routine_data->state == 3) {
+            printf("33333\n");
             // read headers and parse headers
             ssize_t nread =
                 nio_readline(&routine_data->nio, &routine_data->req_buf);
@@ -125,7 +125,6 @@ int routine(routine_data_t *routine_data) {
                 if (err != TEST_ERROR_NONE) {
                     serve((char *)routine_data->req_buf.data,
                           routine_data->req_buf.size, &routine_data->nio);
-                    routine_data->state = 1;
                     continue;
                 }
                 if (strcmp(routine_data->request.http_method, GET) == 0 ||
@@ -146,7 +145,6 @@ int routine(routine_data_t *routine_data) {
                         // header doesn't contain Content-Length
                         serve((char *)routine_data->req_buf.data,
                               routine_data->req_buf.size, &routine_data->nio);
-                        routine_data->state = 1;
                     } else {
                         routine_data->nleft = atoi(content_length);
                         routine_data->state = 4;
@@ -155,7 +153,6 @@ int routine(routine_data_t *routine_data) {
                 } else {
                     serve((char *)routine_data->req_buf.data,
                           routine_data->req_buf.size, &routine_data->nio);
-                    routine_data->state = 1;
                     continue;
                 }
             }
@@ -249,7 +246,9 @@ int main(int argc, char *argv[]) {
 
         for (int i = 0; i < conncount + 1; i++) {
             // handle client drop
-            if (fds[i].revents & POLLHUP || fds[i].revents & POLLERR) {
+            if ((fds[i].revents & POLLERR)) {
+                printf("%d\n", fds[i].revents & POLLHUP);
+                printf("%d\n", fds[i].revents & POLLERR);
                 int fd = fds[i].fd;
                 fds[i] = fds[conncount];
                 routine_data_arr[i] = routine_data_arr[conncount];
@@ -287,6 +286,7 @@ int main(int argc, char *argv[]) {
                     routine_data_arr[conncount].state = 0;
                     nio_init(&routine_data_arr[conncount].nio,
                              fds[conncount].fd);
+                    // routine(&routine_data_arr[i]);
                 }
             } else if (fds[i].revents & POLLIN) {
                 routine(&routine_data_arr[i]);
