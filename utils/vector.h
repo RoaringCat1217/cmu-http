@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#define VECTOR_INIT_CAPACITY 16;
+#define VECTOR_INIT_CAPACITY 2048;
 
 typedef struct {
     size_t size;
