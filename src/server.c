@@ -506,12 +506,12 @@ void serve(char *buf, size_t size, nio_t *nio) {
             write_http_400(nio);
             return;
         }
-        char header_val[MAX_LINE];
-        get_header_value(request, "connection", header_val);
-        if (strcmp(header_val, "close") == 0) {
-            nio->rclosed = true;
-            return;
-        }
+        // char header_val[MAX_LINE];
+        // get_header_value(request, CONNECTION_STR, header_val);
+        // if (strcmp(header_val, CLOSE) == 0) {
+        //     nio->rclosed = true;
+        //     return;
+        // }
     } else {
         // parse error
         write_http_400(nio);
