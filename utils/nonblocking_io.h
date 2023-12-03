@@ -19,8 +19,8 @@ typedef struct {
 void nio_init(nio_t *nio, int fd);
 // read as much as possible from fd
 ssize_t nio_read(nio_t *nio);
-// read as much as possible from nio and store data to usrbuf
-ssize_t nio_readb(nio_t *nio, vector_t *usrbuf);
+// read as much as possible from nio and store at most n bytes of data to usrbuf. If n == -1, store all the data to usrbuf
+ssize_t nio_readb(nio_t *nio, vector_t *usrbuf, ssize_t n);
 // read until reaching a '\n' and store data to line (including '\n'). LINE IS NOT A STRING!!!
 ssize_t nio_readline(nio_t *nio, vector_t *line);
 // write as much as possible to fd
