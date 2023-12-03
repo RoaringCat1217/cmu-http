@@ -246,9 +246,7 @@ int main(int argc, char *argv[]) {
 
         for (int i = 0; i < conncount + 1; i++) {
             // handle client drop
-            if ((fds[i].revents & POLLERR)) {
-                printf("%d\n", fds[i].revents & POLLHUP);
-                printf("%d\n", fds[i].revents & POLLERR);
+            if ((fds[i].revents & POLLHUP) ||(fds[i].revents & POLLERR)) {
                 int fd = fds[i].fd;
                 fds[i] = fds[conncount];
                 routine_data_arr[i] = routine_data_arr[conncount];
@@ -286,7 +284,8 @@ int main(int argc, char *argv[]) {
                     routine_data_arr[conncount].state = 0;
                     nio_init(&routine_data_arr[conncount].nio,
                              fds[conncount].fd);
-                    // routine(&routine_data_arr[i]);
+                    routine(&routine_data_arr[conncount]);
+                    nio_writeb(&routine_data_arr[conncount].nio, NULL, 0);
                 }
             } else if (fds[i].revents & POLLIN) {
                 routine(&routine_data_arr[i]);
