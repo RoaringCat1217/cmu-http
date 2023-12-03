@@ -27,8 +27,9 @@ static uint64_t hash(const char *string) {
     return result;
 }
 
-void fileset_init(fileset_t *fileset) {
+void fileset_init(fileset_t *fileset, char *root) {
     fileset->size = 0;
+    sprintf(fileset->root, "%s/", root);
     for (int i = 0; i < N_BUCKETS; i++)
         fileset->buckets[i] = NULL;
 }

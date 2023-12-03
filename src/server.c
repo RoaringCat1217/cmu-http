@@ -205,7 +205,7 @@ int main(int argc, char *argv[]) {
     }
 
     // open all files and store their fds in fileset
-    fileset_init(&fileset);
+    fileset_init(&fileset, www_folder);
     char path_to_file[MAX_LINE];
     char file_name[MAX_LINE];
     strcpy(path_to_file, www_folder);
@@ -228,15 +228,6 @@ int main(int argc, char *argv[]) {
         fileset_insert(&fileset, file_name, path_to_file);
     }
     closedir(www_dir);
-
-    for (int i = 0; i < N_BUCKETS; i++) {
-        file_entry_t *entry = fileset.buckets[i];
-        if (entry) {
-            for (; entry != NULL; entry = entry->next) {
-                printf("filename: %s\n", entry->filename);
-            }
-        }
-    }
 
     char port[6];
     sprintf(port, "%d", HTTP_PORT);
@@ -409,6 +400,12 @@ void serve(char *buf, size_t size, nio_t *nio) {
             }
             int file_fd = fileset_find(&fileset, request.http_uri);
             if (file_fd == -1) {
+                char file_path[MAX_LINE];
+                sprintf(file_path, "%s%s", fileset.root, request.http_uri);
+                file_fd = open(file_path, O_RDONLY);
+            }
+
+            if (file_fd < 0) {
                 // file not found
                 write_http_404(nio);
                 return;
