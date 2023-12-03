@@ -505,7 +505,7 @@ void serve(char *buf, size_t size, nio_t *nio) {
         }
         char header_val[MAX_LINE];
         get_header_value(request, "connection", header_val);
-        if (strcpy(header_val, "close") == 0) {
+        if (strcmp(header_val, "close") == 0) {
             nio->rclosed = true;
         }
     } else {
