@@ -59,7 +59,6 @@ routine_data_t routine_data_arr[MAX_CONNECTION + 1];
 fileset_t fileset;
 
 int routine(routine_data_t *routine_data);
-void add_files_in_folder(char *www_folder, char *prev_path);
 void write_http_400(nio_t *nio);
 void write_http_404(nio_t *nio);
 void write_http_503(nio_t *nio, bool instant);
@@ -176,7 +175,6 @@ int routine(routine_data_t *routine_data) {
             }
             if (nread == NOT_READY)
                 return YIELD;
-
             routine_data->nleft -= nread;
             if (routine_data->nleft > 0)
                 return YIELD;
@@ -206,25 +204,27 @@ int main(int argc, char *argv[]) {
     }
 
     // open all files and store their fds in fileset
-    fileset_init(&fileset, www_folder);
-
+    fileset_init(&fileset);
+    char path_to_file[MAX_LINE];
     char file_name[MAX_LINE];
-    char prev_path[MAX_LINE] = "/";
-
+    strcpy(path_to_file, www_folder);
+    size_t len = strlen(path_to_file);
+    // make sure it ends with /
+    if (path_to_file[len - 1] != '/') {
+        path_to_file[len] = '/';
+        len++;
+        path_to_file[len] = '\0';
+    }
     struct dirent *entry;
     while ((entry = readdir(www_dir)) != NULL) {
         if (strcmp(".", entry->d_name) == 0 ||
             strcmp("..", entry->d_name) == 0) {
             continue;
         }
-
-        if (entry->d_type == DT_DIR) {
-            add_files_in_folder(entry->d_name, prev_path);
-        } else {
-            file_name[0] = '/';
-            strcpy(file_name + 1, entry->d_name);
-            fileset_insert(&fileset, file_name);
-        }
+        strcpy(path_to_file + len, entry->d_name);
+        file_name[0] = '/';
+        strcpy(file_name + 1, entry->d_name);
+        fileset_insert(&fileset, file_name, path_to_file);
     }
     closedir(www_dir);
 
@@ -249,8 +249,6 @@ int main(int argc, char *argv[]) {
     fds[0].events = POLLIN | POLLERR;
     fds[0].revents = 0;
 
-    // Signal(SIGPIPE, sigpipe_handler);
-    sleep(5);
     while (1) {
         int ret = poll(fds, conncount + 1, -1);
         if (ret < 0) {
@@ -329,48 +327,6 @@ int main(int argc, char *argv[]) {
     }
 
     return EXIT_SUCCESS;
-}
-
-void add_files_in_folder(char *www_folder, char *prev_path) {
-    char folder_path[MAX_LINE];
-    strcpy(folder_path, fileset.root);
-    size_t folder_path_len = strlen(folder_path);
-    strcpy(folder_path + folder_path_len, prev_path);
-    folder_path_len = strlen(folder_path);
-    strcpy(folder_path + folder_path_len, www_folder);
-
-    DIR *www_dir = opendir(folder_path);
-    if (www_dir == NULL) {
-        fprintf(stderr, "Unable to open www folder %s.\n", folder_path);
-        exit(EXIT_FAILURE);
-    }
-
-    char file_name[MAX_LINE];
-    strcpy(file_name, prev_path);
-    size_t file_len = strlen(file_name);
-    strcpy(file_name + file_len, www_folder);
-    file_len = strlen(file_name);
-
-    size_t prev_path_len = strlen(prev_path);
-    prev_path[prev_path_len++] = '/';
-    strcpy(prev_path + prev_path_len, www_folder);
-
-    struct dirent *entry;
-    while ((entry = readdir(www_dir)) != NULL) {
-        if (strcmp(".", entry->d_name) == 0 ||
-            strcmp("..", entry->d_name) == 0) {
-            continue;
-        }
-
-        if (entry->d_type == DT_DIR) {
-            add_files_in_folder(entry->d_name, prev_path);
-        } else {
-            file_name[file_len] = '/';
-            strcpy(file_name + 1 + file_len, entry->d_name);
-            fileset_insert(&fileset, file_name);
-        }
-    }
-    closedir(www_dir);
 }
 
 void write_http_400(nio_t *nio) {
@@ -506,14 +462,15 @@ void serve(char *buf, size_t size, nio_t *nio) {
             write_http_400(nio);
             return;
         }
-        char header_val[MAX_LINE];
-        get_header_value(request, CONNECTION_STR, header_val);
-        if (strcmp(header_val, CLOSE) == 0) {
+        char connection_status[MAX_LINE];
+        get_header_value(request, CONNECTION_STR, connection_status);
+        if (strcmp(connection_status, CLOSE) == 0) {
             nio->rclosed = true;
             return;
         }
     } else {
         // parse error
         write_http_400(nio);
+        return;
     }
 }
