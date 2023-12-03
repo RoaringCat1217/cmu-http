@@ -176,8 +176,9 @@ int routine(routine_data_t *routine_data) {
             if (nread == NOT_READY)
                 return YIELD;
             routine_data->nleft -= nread;
+            printf("%zu\n", routine_data->nleft);
             if (routine_data->nleft > 0)
-                return YIELD;
+                continue;
             // received all the body
             serve((char *)routine_data->req_buf.data,
                   routine_data->req_buf.size, &routine_data->nio);
