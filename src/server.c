@@ -45,13 +45,19 @@ typedef struct {
     int progress;
 } routine_data_t;
 
-struct pollfd fds[MAX_CONNECTION + 1];
 int conncount = 0;
+struct pollfd fds[MAX_CONNECTION + 1];
+routine_data_t routine_data_arr[MAX_CONNECTION + 1];
+
 fileset_t fileset;
 
 void routine(routine_data_t *routine_data);
-
-void serve();
+void write_http_400(nio_t *nio);
+void write_http_404(nio_t *nio);
+void write_http_503(nio_t *nio, bool instant);
+int get_header_value(Request request, char *header_name, char *header_value);
+test_error_code_t parse_header(char *buf, size_t size, Request *request);
+void serve(char *buf, size_t size, nio_t *nio);
 
 int main(int argc, char *argv[]) {
     /* Validate and parse args */
@@ -131,8 +137,12 @@ int main(int argc, char *argv[]) {
                 printf("get connection %d from %s:%d\n", conn,
                        inet_ntoa(client.sin_addr), client.sin_port);
 
-                if (conncount == MAX_CONNECTION) {
-                    // send back HTTP 503 and close connection
+                if (conncount >= MAX_CONNECTION) {
+                    // send back HTTP 503 and close connection right away
+                    nio_t nio;
+                    nio_init(&nio, conn);
+                    write_http_503(&nio, true);
+                    close(conn);
                 } else {
                     conncount++;
                     fds[conncount].fd = conn;
@@ -140,21 +150,33 @@ int main(int argc, char *argv[]) {
                     fds[conncount].revents = 0;
 
                     // allocate space for a new routine_data
-                    routine_data_t *routine_data =
-                        malloc(sizeof(routine_data_t));
-                    routine_data->progress = 0;
-                    nio_init(&routine_data->nio, fds[conncount].fd);
+                    routine_data_arr[conncount].progress = 0;
+                    nio_init(&routine_data_arr[conncount].nio,
+                             fds[conncount].fd);
                 }
             } else if (fds[i].revents & POLLIN) {
-
+                routine(&routine_data_arr[i]);
             } else if (fds[i].revents & POLLOUT) {
+                nio_writeb(&routine_data_arr[i].nio, NULL, 0);
             }
 
-            // determine write buffer is empty or not
-            // if empty, fds[i].events &= (~POLLIN);
-            //           fds[i].events |= POLLOUT;
-            // if not empty, fds[i].events &= (~POLLIN);
-            //               fds[i].events |= POLLOUT;
+            if (routine_data_arr[conncount].nio.rclosed &&
+                routine_data_arr[conncount].nio.wbuf.size == 0) {
+                int fd = fds[i].fd;
+                fds[i] = fds[conncount];
+                i--;
+                conncount--;
+                close(fd);
+                printf("delete connection: %d\n", fd);
+            } else if (routine_data_arr[conncount].nio.wbuf.size == 0) {
+                // continue to read data
+                fds[i].events &= (~POLLOUT);
+                fds[i].events |= POLLIN;
+            } else if (routine_data_arr[conncount].nio.wbuf.size > 0) {
+                // continue to write data
+                fds[i].events &= (~POLLIN);
+                fds[i].events |= POLLOUT;
+            }
         }
     }
 
@@ -181,20 +203,37 @@ void write_http_404(nio_t *nio) {
     }
 }
 
-void write_http_503(nio_t *nio) {
+void write_http_503(nio_t *nio, bool instant) {
     char *msg;
     size_t len;
 
     if (serialize_http_response(&msg, &len, SERVICE_UNAVAILABLE, NULL, NULL,
                                 NULL, 0, NULL) == TEST_ERROR_NONE) {
-        nio_writeb_pushback(nio, (uint8_t *)msg, len);
+        if (instant) {
+            nio_writeb(nio, (uint8_t *)msg, len);
+        } else {
+            nio_writeb_pushback(nio, (uint8_t *)msg, len);
+        }
     }
 }
 
-test_error_code_t parse_header(char *buf, size_t size, Request request) {
-    test_error_code_t error_code = parse_http_request(buf, size, &request);
+int get_header_value(Request request, char *header_name, char *header_value) {
+    for (int i = 0; i < request.header_count; i++) {
+        if (strcmp(request.headers[i].header_name, header_name)) {
+            strcpy(header_value, request.headers[i].header_value);
+            return 0;
+        }
+    }
+    return -1;
+}
 
-    if (error_code == TEST_ERROR_NONE && request.valid) {
+test_error_code_t parse_header(char *buf, size_t size, Request *request) {
+    if (request == NULL)
+        return TEST_ERROR_NONE;
+
+    test_error_code_t error_code = parse_http_request(buf, size, request);
+
+    if (error_code == TEST_ERROR_NONE && request->valid) {
         return TEST_ERROR_NONE;
     } else {
         return error_code;
@@ -206,14 +245,21 @@ void serve(char *buf, size_t size, nio_t *nio) {
     test_error_code_t error_code = parse_http_request(buf, size, &request);
 
     if (error_code == TEST_ERROR_NONE && request.valid) {
+        int file_fd = fileset_find(&fileset, request.http_uri);
+        if (file_fd == -1) {
+            // file not found
+            write_http_404(nio);
+        } else {
+            if (strcmp(request.http_method, GET) == 0) {
 
-        if (strcmp(request.http_method, GET) == 0) {
+            } else if (strcmp(request.http_method, HEAD) == 0) {
 
-        } else if (strcmp(request.http_method, HEAD) == 0) {
-
-        } else if (strcmp(request.http_method, POST) == 0) {
+            } else if (strcmp(request.http_method, POST) == 0) {
+                nio_writeb_pushback(nio, (uint8_t *)buf, size);
+            }
         }
     } else {
         // parse error
+        write_http_400(nio);
     }
 }
