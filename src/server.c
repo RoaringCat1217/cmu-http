@@ -76,7 +76,7 @@ int routine(routine_data_t *routine_data) {
             routine_data->request.body = NULL;
             routine_data->request.headers = NULL;
             routine_data->close_conn = false;
-            routine_data->state = 2;
+            routine_data->state = 3;
             continue;
         }
 
@@ -146,7 +146,7 @@ int routine(routine_data_t *routine_data) {
                     routine_data->req_buf.size, &routine_data->request);
                 if (err != TEST_ERROR_NONE) {
                     serve(routine_data);
-                    routine_data->state = 2;
+                    routine_data->state = 1;
                     continue;
                 }
                 // headers are valid, check Keep-Alive
