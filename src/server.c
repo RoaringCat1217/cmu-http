@@ -255,11 +255,10 @@ int main(int argc, char *argv[]) {
             if ((fds[i].revents & POLLHUP) ||(fds[i].revents & POLLERR)) {
                 int fd = fds[i].fd;
                 nio_free(&routine_data_arr[i].nio);
-                vector_free(&routine_data_arr[i].req_buf);
                 fds[i].fd = -1; // mark as deleted
                 close(fd);
                 conncount--;
-                printf("delete connection: %d\n", fd);
+                printf("deleted connection: %d\n", fd);
             } else if ((fds[i].fd == listenfd) && (fds[i].revents & POLLIN)) {
                 // accept and initialize a new routine
                 struct sockaddr_in client;
@@ -305,11 +304,10 @@ int main(int argc, char *argv[]) {
                     routine_data_arr[i].nio.wbuf.size == 0) {
                     int fd = fds[i].fd;
                     nio_free(&routine_data_arr[i].nio);
-                    vector_free(&routine_data_arr[i].req_buf);
                     fds[i].fd = -1; // mark as deleted
                     close(fd);
                     conncount--;
-                    printf("delete connection: %d\n", fd);
+                    printf("deleted connection: %d\n", fd);
                 } else if (routine_data_arr[i].nio.wbuf.size == 0) {
                     // continue to read data
                     fds[i].events &= (~POLLOUT);
