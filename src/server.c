@@ -27,6 +27,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "dstring.h"
 #include "fileset.h"
 #include "net_helper.h"
 #include "parse_http.h"
@@ -39,15 +40,18 @@
 #define CONNECTION_TIMEOUT 50
 #define MAX_CONNECTION 100
 
-struct pollfd fds[MAX_CONNECTION + 1];
-int conncount = 0;
-
 typedef struct {
     nio_t nio;
     int progress;
 } routine_data_t;
 
+struct pollfd fds[MAX_CONNECTION + 1];
+int conncount = 0;
+fileset_t fileset;
+
 void routine(routine_data_t *routine_data);
+
+void serve();
 
 int main(int argc, char *argv[]) {
     /* Validate and parse args */
@@ -65,7 +69,6 @@ int main(int argc, char *argv[]) {
     }
 
     // open all files and store their fds in fileset
-    fileset_t fileset;
     fileset_init(&fileset);
     char path_to_file[MAX_LINE];
     strcpy(path_to_file, www_folder);
@@ -127,19 +130,24 @@ int main(int argc, char *argv[]) {
                 }
                 printf("get connection %d from %s:%d\n", conn,
                        inet_ntoa(client.sin_addr), client.sin_port);
-                conncount++;
-                fds[conncount].fd = conn;
-                fds[conncount].events = POLLIN | POLLHUP | POLLERR;
-                fds[conncount].revents = 0;
 
-                // allocate space for a new routine_data
-                routine_data_t *routine_data = malloc(sizeof(routine_data_t));
-                routine_data->progress = 0;
-                nio_init(&routine_data->nio, fds[conncount].fd);
+                if (conncount == MAX_CONNECTION) {
+                    // send back HTTP 503 and close connection
+                } else {
+                    conncount++;
+                    fds[conncount].fd = conn;
+                    fds[conncount].events = POLLIN | POLLHUP | POLLERR;
+                    fds[conncount].revents = 0;
+
+                    // allocate space for a new routine_data
+                    routine_data_t *routine_data =
+                        malloc(sizeof(routine_data_t));
+                    routine_data->progress = 0;
+                    nio_init(&routine_data->nio, fds[conncount].fd);
+                }
             } else if (fds[i].revents & POLLIN) {
 
             } else if (fds[i].revents & POLLOUT) {
-
             }
 
             // determine write buffer is empty or not
@@ -151,4 +159,61 @@ int main(int argc, char *argv[]) {
     }
 
     return EXIT_SUCCESS;
+}
+
+void write_http_400(nio_t *nio) {
+    char *msg;
+    size_t len;
+
+    if (serialize_http_response(&msg, &len, BAD_REQUEST, NULL, NULL, NULL, 0,
+                                NULL) == TEST_ERROR_NONE) {
+        vector_push_back(&nio->wbuf, (uint8_t *)msg, len);
+    }
+}
+
+void write_http_404(nio_t *nio) {
+    char *msg;
+    size_t len;
+
+    if (serialize_http_response(&msg, &len, NOT_FOUND, NULL, NULL, NULL, 0,
+                                NULL) == TEST_ERROR_NONE) {
+        vector_push_back(&nio->wbuf, (uint8_t *)msg, len);
+    }
+}
+
+void write_http_503(nio_t *nio) {
+    char *msg;
+    size_t len;
+
+    if (serialize_http_response(&msg, &len, SERVICE_UNAVAILABLE, NULL, NULL,
+                                NULL, 0, NULL) == TEST_ERROR_NONE) {
+        vector_push_back(&nio->wbuf, (uint8_t *)msg, len);
+    }
+}
+
+test_error_code_t parse_header(char *buf, size_t size, Request request) {
+    test_error_code_t error_code = parse_http_request(buf, size, &request);
+
+    if (error_code == TEST_ERROR_NONE && request.valid) {
+        return TEST_ERROR_NONE;
+    } else {
+        return error_code;
+    }
+}
+
+void serve(char *buf, size_t size, nio_t *nio) {
+    Request request;
+    test_error_code_t error_code = parse_http_request(buf, size, &request);
+
+    if (error_code == TEST_ERROR_NONE && request.valid) {
+
+        if (strcmp(request.http_method, GET) == 0) {
+
+        } else if (strcmp(request.http_method, HEAD) == 0) {
+
+        } else if (strcmp(request.http_method, POST) == 0) {
+        }
+    } else {
+        // parse error
+    }
 }
