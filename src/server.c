@@ -324,7 +324,6 @@ int main(int argc, char *argv[]) {
 void write_http_400(nio_t *nio) {
     char *msg;
     size_t len;
-    nio->rclosed = true;
 
     if (serialize_http_response(&msg, &len, BAD_REQUEST, NULL, NULL, NULL, 0,
                                 NULL) == TEST_ERROR_NONE) {
