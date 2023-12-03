@@ -364,7 +364,8 @@ void write_http_503(nio_t *nio, bool instant) {
 int get_header_value(Request request, char *header_name, char *header_value) {
     for (int i = 0; i < request.header_count; i++) {
         if (strcmp(request.headers[i].header_name, header_name) == 0) {
-            strcpy(header_value, request.headers[i].header_value);
+            // ignore the leading zero
+            strcpy(header_value, request.headers[i].header_value + 1);
             return 0;
         }
     }
