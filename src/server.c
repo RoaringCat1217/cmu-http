@@ -50,6 +50,7 @@ typedef struct {
     vector_t req_buf;
     Request request;
     size_t nleft;
+    bool close_conn;
 } routine_data_t;
 
 int conncount = 0;
@@ -61,10 +62,10 @@ fileset_t fileset;
 int routine(routine_data_t *routine_data);
 void write_http_400(nio_t *nio);
 void write_http_404(nio_t *nio);
-void write_http_503(nio_t *nio, bool instant);
+void write_http_503(nio_t *nio);
 int get_header_value(Request *request, char *header_name, char *header_value);
 test_error_code_t parse_header(char *buf, size_t size, Request *request);
-void serve(char *buf, size_t size, nio_t *nio);
+void serve(routine_data_t *routine_data);
 
 bool need_to_close(Request *request) {
     char connection_status[MAX_LINE];
@@ -80,6 +81,7 @@ int routine(routine_data_t *routine_data) {
             vector_init(&routine_data->req_buf);
             routine_data->request.body = NULL;
             routine_data->request.headers = NULL;
+            routine_data->close_conn = false;
             routine_data->state = 2;
             continue;
         }
@@ -87,6 +89,7 @@ int routine(routine_data_t *routine_data) {
         if (routine_data->state == 1) {
             // free routine_data, and return
             printf("routine: entered state 1\n");
+            routine_data->nio.rclosed = true;
             vector_free(&routine_data->req_buf);
             if (routine_data->request.body != NULL)
                 free(routine_data->request.body);
@@ -97,31 +100,45 @@ int routine(routine_data_t *routine_data) {
         }
 
         if (routine_data->state == 2) {
-            // read request header line
+            // clean structures, then go to serve next request
             printf("routine: entered state 2\n");
+            vector_clear(&routine_data->req_buf);
+            if (routine_data->request.body != NULL) {
+                free(routine_data->request.body);
+                routine_data->request.body = NULL;
+            }
+            if (routine_data->request.headers != NULL) {
+                free(routine_data->request.headers);
+                routine_data->request.headers = NULL;
+            }
+            routine_data->state = 3;
+            continue;
+        }
+
+        if (routine_data->state == 3) {
+            // read request header line
+            printf("routine: entered state 3\n");
             ssize_t nread =
                 nio_readline(&routine_data->nio, &routine_data->req_buf);
             if (nread == 0) {
                 if (routine_data->req_buf.size != 0)
-                    serve((char *)routine_data->req_buf.data,
-                          routine_data->req_buf.size, &routine_data->nio);
+                    serve(routine_data);
                 routine_data->state = 1;
                 continue;
             }
             if (nread == NOT_READY)
                 return YIELD;
 
-            routine_data->state = 3;
+            routine_data->state = 4;
         }
 
-        if (routine_data->state == 3) {
+        if (routine_data->state == 4) {
             // read headers and parse headers
-            printf("routine: entered state 3\n");
+            printf("routine: entered state 4\n");
             ssize_t nread =
                 nio_readline(&routine_data->nio, &routine_data->req_buf);
             if (nread == 0) {
-                serve((char *)routine_data->req_buf.data,
-                      routine_data->req_buf.size, &routine_data->nio);
+                serve(routine_data);
                 routine_data->state = 1;
                 continue;
             }
@@ -129,63 +146,59 @@ int routine(routine_data_t *routine_data) {
                 return YIELD;
             if (nread == 2) {
                 // read \r\n, headers finished
+                // parse request line and headers
                 test_error_code_t err = parse_header(
                     (char *)routine_data->req_buf.data,
                     routine_data->req_buf.size, &routine_data->request);
                 if (err != TEST_ERROR_NONE) {
-                    serve((char *)routine_data->req_buf.data,
-                          routine_data->req_buf.size, &routine_data->nio);
-                    vector_clear(&routine_data->req_buf);
+                    serve(routine_data);
                     routine_data->state = 2;
                     continue;
                 }
+                // headers are valid, check Keep-Alive
+                char conn_status[MAX_LINE];
+                get_header_value(&routine_data->request, CONNECTION_STR, conn_status);
+                if (strncasecmp(conn_status, CLOSE, strlen(CLOSE)) == 0)
+                    routine_data->close_conn = true;
+
                 if (strcmp(routine_data->request.http_method, GET) == 0 ||
                     strcmp(routine_data->request.http_method, HEAD) == 0) {
                     // do not need to receive body, serve the client
-                    serve((char *)routine_data->req_buf.data,
-                          routine_data->req_buf.size, &routine_data->nio);
-                    if (need_to_close(&routine_data->request)) {
-                        routine_data->nio.rclosed = true;
+                    serve(routine_data);
+                    if (routine_data->close_conn) {
                         routine_data->state = 1;
                         continue;
                     } else {
-                        vector_clear(&routine_data->req_buf);
                         routine_data->state = 2;
                         continue;
                     }
-                } else if (strcmp(routine_data->request.http_method, POST) ==
-                           0) {
+                } else if (strcmp(routine_data->request.http_method, POST) == 0) {
                     // POST, need to receive body
                     char content_length[4096];
                     if (get_header_value(&routine_data->request,
                                          "Content-Length",
                                          content_length) == -1) {
                         // headers don't contain Content-Length, serve now
-                        serve((char *)routine_data->req_buf.data,
-                              routine_data->req_buf.size, &routine_data->nio);
-                        if (need_to_close(&routine_data->request)) {
-                            routine_data->nio.rclosed = true;
+                        serve(routine_data);
+                        if (routine_data->close_conn) {
                             routine_data->state = 1;
                             continue;
                         } else {
-                            vector_clear(&routine_data->req_buf);
                             routine_data->state = 2;
                             continue;
                         }
                     } else {
                         routine_data->nleft = atoi(content_length);
-                        routine_data->state = 4;
+                        routine_data->state = 5;
                         continue;
                     }
                 } else {
-                    serve((char *)routine_data->req_buf.data,
-                          routine_data->req_buf.size, &routine_data->nio);
+                    // unknown method
+                    serve(routine_data);
                     if (need_to_close(&routine_data->request)) {
-                        routine_data->nio.rclosed = true;
                         routine_data->state = 1;
                         continue;
                     } else {
-                        vector_clear(&routine_data->req_buf);
                         routine_data->state = 2;
                         continue;
                     }
@@ -194,15 +207,14 @@ int routine(routine_data_t *routine_data) {
             continue;
         }
 
-        if (routine_data->state == 4) {
+        if (routine_data->state == 5) {
             // read data for body
-            printf("routine: entered state 4\n");
+            printf("routine: entered state 5\n");
             ssize_t nread =
                 nio_readb(&routine_data->nio, &routine_data->req_buf,
                           routine_data->nleft);
             if (nread == 0) {
-                serve((char *)routine_data->req_buf.data,
-                      routine_data->req_buf.size, &routine_data->nio);
+                serve(routine_data);
                 routine_data->state = 1;
                 continue;
             }
@@ -212,14 +224,11 @@ int routine(routine_data_t *routine_data) {
             if (routine_data->nleft > 0)
                 continue;
             // received all the body
-            serve((char *)routine_data->req_buf.data,
-                  routine_data->req_buf.size, &routine_data->nio);
+            serve(routine_data);
             if (need_to_close(&routine_data->request)) {
-                routine_data->nio.rclosed = true;
                 routine_data->state = 1;
                 continue;
             } else {
-                vector_clear(&routine_data->req_buf);
                 routine_data->state = 2;
                 continue;
             }
@@ -314,7 +323,8 @@ int main(int argc, char *argv[]) {
                     // send back HTTP 503 and close connection right away
                     nio_t nio;
                     nio_init(&nio, conn);
-                    write_http_503(&nio, true);
+                    write_http_503(&nio);
+                    nio.rclosed = true;
                     nio_free(&nio);
                     close(conn);
                 } else {
@@ -398,18 +408,13 @@ void write_http_404(nio_t *nio) {
     }
 }
 
-void write_http_503(nio_t *nio, bool instant) {
+void write_http_503(nio_t *nio) {
     char *msg;
     size_t len;
-    nio->rclosed = true;
 
     if (serialize_http_response(&msg, &len, SERVICE_UNAVAILABLE, NULL, NULL,
                                 NULL, 0, NULL) == TEST_ERROR_NONE) {
-        if (instant) {
-            nio_writeb(nio, (uint8_t *)msg, len);
-        } else {
-            nio_writeb(nio, (uint8_t *)msg, len);
-        }
+        nio_writeb(nio, (uint8_t *)msg, len);
         free(msg);
     }
 }
@@ -438,13 +443,13 @@ test_error_code_t parse_header(char *buf, size_t size, Request *request) {
     }
 }
 
-void serve(char *buf, size_t size, nio_t *nio) {
+void serve(routine_data_t *routine_data) {
     Request request;
-    test_error_code_t error_code = parse_http_request(buf, size, &request);
+    test_error_code_t error_code = parse_http_request((char *)routine_data->req_buf.data, routine_data->req_buf.size, &request);
 
     if (error_code == TEST_ERROR_NONE && request.valid) {
         if (strcmp(request.http_version, HTTP_VER) != 0) {
-            write_http_400(nio);
+            write_http_400(&routine_data->nio);
         } else {
             if (strcmp(request.http_method, GET) == 0 ||
                 strcmp(request.http_method, HEAD) == 0) {
@@ -464,7 +469,7 @@ void serve(char *buf, size_t size, nio_t *nio) {
 
                 if (file_fd < 0) {
                     // file not found
-                    write_http_404(nio);
+                    write_http_404(&routine_data->nio);
                     return;
                 } else {
                     if (strcmp(request.http_method, GET) == 0) {
@@ -487,7 +492,7 @@ void serve(char *buf, size_t size, nio_t *nio) {
                         if (serialize_http_response(&msg, &len, OK, NULL,
                                                     content_len, NULL, file_len,
                                                     data) == TEST_ERROR_NONE) {
-                            nio_writeb(nio, (uint8_t *)msg, len);
+                            nio_writeb(&routine_data->nio, (uint8_t *)msg, len);
                             free(msg);
                         }
                         free(data);
@@ -498,7 +503,7 @@ void serve(char *buf, size_t size, nio_t *nio) {
                         if (serialize_http_response(&msg, &len, OK, NULL, NULL,
                                                     NULL, 0,
                                                     NULL) == TEST_ERROR_NONE) {
-                            nio_writeb(nio, (uint8_t *)msg, len);
+                            nio_writeb(&routine_data->nio, (uint8_t *)msg, len);
                             free(msg);
                         }
                     }
@@ -509,26 +514,17 @@ void serve(char *buf, size_t size, nio_t *nio) {
                     get_header_value(&request, "Content-Length", content_length);
                 if (err == -1) {
                     // if a post request doesn't contain content-length
-                    write_http_400(nio);
+                    write_http_400(&routine_data->nio);
                 } else {
-                    nio_writeb(nio, (uint8_t *)buf, size);
+                    nio_writeb(&routine_data->nio, routine_data->req_buf.data, routine_data->req_buf.size);
                 }
             } else {
-                write_http_400(nio);
+                write_http_400(&routine_data->nio);
             }
         }
-        /*
-        char connection_status[MAX_LINE];
-        get_header_value(request, CONNECTION_STR, connection_status);
-        if (strncasecmp(connection_status, CLOSE, strlen(CLOSE)) == 0) {
-            nio->rclosed = true;
-            return;
-        }
-         */
     } else {
         // parse error
-        write_http_400(nio);
-        // nio->rclosed = true;
+        write_http_400(&routine_data->nio);
         return;
     }
 }
