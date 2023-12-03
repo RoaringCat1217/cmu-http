@@ -41,9 +41,15 @@
 #define CONNECTION_TIMEOUT 50
 #define MAX_CONNECTION 100
 
+#define YIELD 0
+#define FINISH 1
+
 typedef struct {
     nio_t nio;
-    int progress;
+    int state;
+    vector_t req_buf;
+    Request request;
+    size_t nleft;
 } routine_data_t;
 
 int conncount = 0;
@@ -52,13 +58,107 @@ routine_data_t routine_data_arr[MAX_CONNECTION + 1];
 
 fileset_t fileset;
 
-void routine(routine_data_t *routine_data);
+int routine(routine_data_t *routine_data);
 void write_http_400(nio_t *nio);
 void write_http_404(nio_t *nio);
 void write_http_503(nio_t *nio, bool instant);
 int get_header_value(Request request, char *header_name, char *header_value);
 test_error_code_t parse_header(char *buf, size_t size, Request *request);
 void serve(char *buf, size_t size, nio_t *nio);
+
+int routine(routine_data_t *routine_data) {
+    while (true) {
+        if (routine_data->state == 0) {
+            // initialize routine_data
+            vector_init(&routine_data->req_buf);
+            routine_data->request.body = NULL;
+            routine_data->request.headers = NULL;
+            continue;
+        }
+
+        if (routine_data->state == 1) {
+            // free routine_data, and return
+            vector_free(&routine_data->req_buf);
+            if (routine_data->request.body != NULL)
+                free(routine_data->request.body);
+            if (routine_data->request.headers != NULL)
+                free(routine_data->request.headers);
+            return FINISH;
+        }
+
+        if (routine_data->state == 2) {
+            // read request header line
+            ssize_t nread = nio_readline(&routine_data->nio, &routine_data->req_buf);
+            if (nread == 0) {
+                if (routine_data->req_buf.size != 0)
+                    serve((char *)routine_data->req_buf.data, routine_data->req_buf.size, NULL);
+                routine_data->state = 1;
+                continue;
+            }
+            if (nread == NOT_READY)
+                return YIELD;
+
+            routine_data->state = 3;
+            continue;
+        }
+
+        if (routine_data->state == 3) {
+            // read headers and parse headers
+            ssize_t nread = nio_readline(&routine_data->nio, &routine_data->req_buf);
+            if (nread == 0) {
+                serve((char *)routine_data->req_buf.data, routine_data->req_buf.size, NULL);
+                routine_data->state = 1;
+                continue;
+            }
+            if (nread == NOT_READY)
+                return YIELD;
+            if (nread == 2) {
+                // read \r\n, headers finished
+                test_error_code_t err = parse_header((char *)routine_data->req_buf.data, routine_data->req_buf.size, &routine_data->request);
+                if (err != TEST_ERROR_NONE) {
+                    serve((char *)routine_data->req_buf.data, routine_data->req_buf.size, &routine_data->nio);
+                    routine_data->state = 1;
+                    continue;
+                }
+                if (strcmp(routine_data->request.http_method, "GET") == 0 || strcmp(routine_data->request.http_method, "HEAD") == 0) {
+                    // do not need to receive body, serve the client
+                    serve((char *)routine_data->req_buf.data, routine_data->req_buf.size, &routine_data->nio);
+                    vector_clear(&routine_data->req_buf);
+                    routine_data->state = 2;
+                    continue;
+                } else {
+                    // POST, need to receive body
+                    char content_length[4096];
+                    int err = get_header_value(routine_data->request, "content-length", &content_length);
+                    routine_data->nleft = 0;
+                    routine_data->state = 4;
+                    continue;
+                }
+            }
+            continue;
+        }
+
+        if (routine_data->state == 4) {
+            // read data for body
+            ssize_t nread = nio_readb(&routine_data->nio, &routine_data->req_buf, routine_data->nleft);
+            if (nread == 0) {
+                serve((char *)routine_data->req_buf.data, routine_data->req_buf.size, NULL);
+                routine_data->state = 1;
+                continue;
+            }
+            if (nread == NOT_READY)
+                return YIELD;
+            routine_data->nleft -= nread;
+            if (routine_data->nleft > 0)
+                return YIELD;
+            // received all the body
+            serve((char *)routine_data->req_buf.data, routine_data->req_buf.size, &routine_data->nio);
+            vector_clear(&routine_data->req_buf);
+            routine_data->state = 2;
+            continue;
+        }
+    }
+}
 
 int main(int argc, char *argv[]) {
     /* Validate and parse args */
@@ -151,7 +251,7 @@ int main(int argc, char *argv[]) {
                     fds[conncount].revents = 0;
 
                     // allocate space for a new routine_data
-                    routine_data_arr[conncount].progress = 0;
+                    routine_data_arr[conncount].state = 0;
                     nio_init(&routine_data_arr[conncount].nio,
                              fds[conncount].fd);
                 }
@@ -236,7 +336,6 @@ test_error_code_t parse_header(char *buf, size_t size, Request *request) {
         return TEST_ERROR_NONE;
 
     test_error_code_t error_code = parse_http_request(buf, size, request);
-
     if (error_code == TEST_ERROR_NONE && request->valid) {
         return TEST_ERROR_NONE;
     } else {

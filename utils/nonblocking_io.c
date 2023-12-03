@@ -48,12 +48,17 @@ ssize_t nio_read(nio_t *nio) {
     }
 }
 
-ssize_t nio_readb(nio_t *nio, vector_t *usrbuf) {
+ssize_t nio_readb(nio_t *nio, vector_t *usrbuf, ssize_t n) {
     ssize_t nread = nio_read(nio);
     if (nio->rbuf.size > 0) {
-        nread = nio->rbuf.size;
-        vector_push_back(usrbuf, nio->rbuf.data, nio->rbuf.size);
-        vector_clear(&nio->rbuf);
+        if (n == -1)
+            nread = usrbuf->size;
+        else if (n < usrbuf->size)
+            nread = n;
+        else
+            nread = usrbuf->size;
+        vector_push_back(usrbuf, nio->rbuf.data, nread);
+        vector_pop_front(&nio->rbuf, nread);
     }
     return nread;
 }
