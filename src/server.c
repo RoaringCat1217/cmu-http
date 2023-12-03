@@ -178,7 +178,6 @@ int routine(routine_data_t *routine_data) {
                 return YIELD;
 
             routine_data->nleft -= nread;
-            printf("%zu\n", routine_data->nleft);
             if (routine_data->nleft > 0)
                 return YIELD;
             // received all the body
@@ -377,6 +376,7 @@ void add_files_in_folder(char *www_folder, char *prev_path) {
 void write_http_400(nio_t *nio) {
     char *msg;
     size_t len;
+    nio->rclosed = true;
 
     if (serialize_http_response(&msg, &len, BAD_REQUEST, NULL, NULL, NULL, 0,
                                 NULL) == TEST_ERROR_NONE) {
@@ -388,6 +388,7 @@ void write_http_400(nio_t *nio) {
 void write_http_404(nio_t *nio) {
     char *msg;
     size_t len;
+    nio->rclosed = true;
 
     if (serialize_http_response(&msg, &len, NOT_FOUND, NULL, NULL, NULL, 0,
                                 NULL) == TEST_ERROR_NONE) {
@@ -399,6 +400,7 @@ void write_http_404(nio_t *nio) {
 void write_http_503(nio_t *nio, bool instant) {
     char *msg;
     size_t len;
+    nio->rclosed = true;
 
     if (serialize_http_response(&msg, &len, SERVICE_UNAVAILABLE, NULL, NULL,
                                 NULL, 0, NULL) == TEST_ERROR_NONE) {
@@ -444,7 +446,6 @@ void serve(char *buf, size_t size, nio_t *nio) {
         }
         if (strcmp(request.http_method, GET) == 0 ||
             strcmp(request.http_method, HEAD) == 0) {
-            printf("%s\n", request.http_uri);
             size_t uri_len = strlen(request.http_uri);
             if (request.http_uri[uri_len - 1] == '/') {
                 strcpy(request.http_uri + uri_len, "index.html");
@@ -453,6 +454,7 @@ void serve(char *buf, size_t size, nio_t *nio) {
             if (file_fd == -1) {
                 // file not found
                 write_http_404(nio);
+                return;
             } else {
                 if (strcmp(request.http_method, GET) == 0) {
                     // get file length
@@ -496,6 +498,7 @@ void serve(char *buf, size_t size, nio_t *nio) {
             if (err == -1) {
                 // if a post request doesn't contain content-length
                 write_http_400(nio);
+                return;
             } else {
                 nio_writeb_pushback(nio, (uint8_t *)buf, size);
             }
@@ -507,6 +510,7 @@ void serve(char *buf, size_t size, nio_t *nio) {
         get_header_value(request, "connection", header_val);
         if (strcmp(header_val, "close") == 0) {
             nio->rclosed = true;
+            return;
         }
     } else {
         // parse error
