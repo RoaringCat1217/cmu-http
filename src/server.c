@@ -62,9 +62,15 @@ int routine(routine_data_t *routine_data);
 void write_http_400(nio_t *nio);
 void write_http_404(nio_t *nio);
 void write_http_503(nio_t *nio, bool instant);
-int get_header_value(Request request, char *header_name, char *header_value);
+int get_header_value(Request *request, char *header_name, char *header_value);
 test_error_code_t parse_header(char *buf, size_t size, Request *request);
 void serve(char *buf, size_t size, nio_t *nio);
+
+bool need_to_close(Request *request) {
+    char connection_status[MAX_LINE];
+    get_header_value(request, CONNECTION_STR, connection_status);
+    return strncasecmp(connection_status, CLOSE, strlen(CLOSE)) == 0;
+}
 
 int routine(routine_data_t *routine_data) {
     while (true) {
@@ -98,7 +104,7 @@ int routine(routine_data_t *routine_data) {
             if (nread == 0) {
                 if (routine_data->req_buf.size != 0)
                     serve((char *)routine_data->req_buf.data,
-                          routine_data->req_buf.size, NULL);
+                          routine_data->req_buf.size, &routine_data->nio);
                 routine_data->state = 1;
                 continue;
             }
@@ -115,7 +121,7 @@ int routine(routine_data_t *routine_data) {
                 nio_readline(&routine_data->nio, &routine_data->req_buf);
             if (nread == 0) {
                 serve((char *)routine_data->req_buf.data,
-                      routine_data->req_buf.size, NULL);
+                      routine_data->req_buf.size, &routine_data->nio);
                 routine_data->state = 1;
                 continue;
             }
@@ -129,6 +135,8 @@ int routine(routine_data_t *routine_data) {
                 if (err != TEST_ERROR_NONE) {
                     serve((char *)routine_data->req_buf.data,
                           routine_data->req_buf.size, &routine_data->nio);
+                    vector_clear(&routine_data->req_buf);
+                    routine_data->state = 2;
                     continue;
                 }
                 if (strcmp(routine_data->request.http_method, GET) == 0 ||
@@ -136,28 +144,51 @@ int routine(routine_data_t *routine_data) {
                     // do not need to receive body, serve the client
                     serve((char *)routine_data->req_buf.data,
                           routine_data->req_buf.size, &routine_data->nio);
-                    vector_clear(&routine_data->req_buf);
-                    routine_data->state = 2;
-                    continue;
+                    if (need_to_close(&routine_data->request)) {
+                        routine_data->nio.rclosed = true;
+                        routine_data->state = 1;
+                        continue;
+                    } else {
+                        vector_clear(&routine_data->req_buf);
+                        routine_data->state = 2;
+                        continue;
+                    }
                 } else if (strcmp(routine_data->request.http_method, POST) ==
                            0) {
                     // POST, need to receive body
                     char content_length[4096];
-                    if (get_header_value(routine_data->request,
+                    if (get_header_value(&routine_data->request,
                                          "Content-Length",
                                          content_length) == -1) {
-                        // header doesn't contain Content-Length
+                        // headers don't contain Content-Length, serve now
                         serve((char *)routine_data->req_buf.data,
                               routine_data->req_buf.size, &routine_data->nio);
+                        if (need_to_close(&routine_data->request)) {
+                            routine_data->nio.rclosed = true;
+                            routine_data->state = 1;
+                            continue;
+                        } else {
+                            vector_clear(&routine_data->req_buf);
+                            routine_data->state = 2;
+                            continue;
+                        }
                     } else {
                         routine_data->nleft = atoi(content_length);
                         routine_data->state = 4;
+                        continue;
                     }
-                    continue;
                 } else {
                     serve((char *)routine_data->req_buf.data,
                           routine_data->req_buf.size, &routine_data->nio);
-                    continue;
+                    if (need_to_close(&routine_data->request)) {
+                        routine_data->nio.rclosed = true;
+                        routine_data->state = 1;
+                        continue;
+                    } else {
+                        vector_clear(&routine_data->req_buf);
+                        routine_data->state = 2;
+                        continue;
+                    }
                 }
             }
             continue;
@@ -171,7 +202,7 @@ int routine(routine_data_t *routine_data) {
                           routine_data->nleft);
             if (nread == 0) {
                 serve((char *)routine_data->req_buf.data,
-                      routine_data->req_buf.size, NULL);
+                      routine_data->req_buf.size, &routine_data->nio);
                 routine_data->state = 1;
                 continue;
             }
@@ -183,9 +214,15 @@ int routine(routine_data_t *routine_data) {
             // received all the body
             serve((char *)routine_data->req_buf.data,
                   routine_data->req_buf.size, &routine_data->nio);
-            vector_clear(&routine_data->req_buf);
-            routine_data->state = 2;
-            continue;
+            if (need_to_close(&routine_data->request)) {
+                routine_data->nio.rclosed = true;
+                routine_data->state = 1;
+                continue;
+            } else {
+                vector_clear(&routine_data->req_buf);
+                routine_data->state = 2;
+                continue;
+            }
         }
     }
 }
@@ -353,7 +390,6 @@ void write_http_400(nio_t *nio) {
 void write_http_404(nio_t *nio) {
     char *msg;
     size_t len;
-    nio->rclosed = true;
 
     if (serialize_http_response(&msg, &len, NOT_FOUND, NULL, NULL, NULL, 0,
                                 NULL) == TEST_ERROR_NONE) {
@@ -378,12 +414,12 @@ void write_http_503(nio_t *nio, bool instant) {
     }
 }
 
-int get_header_value(Request request, char *header_name, char *header_value) {
-    for (int i = 0; i < request.header_count; i++) {
-        if (strncasecmp(request.headers[i].header_name, header_name,
+int get_header_value(Request *request, char *header_name, char *header_value) {
+    for (int i = 0; i < request->header_count; i++) {
+        if (strncasecmp(request->headers[i].header_name, header_name,
                         strlen(header_name)) == 0) {
             // ignore the leading space
-            strcpy(header_value, request.headers[i].header_value + 1);
+            strcpy(header_value, request->headers[i].header_value + 1);
             return 0;
         }
     }
@@ -470,7 +506,7 @@ void serve(char *buf, size_t size, nio_t *nio) {
             } else if (strcmp(request.http_method, POST) == 0) {
                 char content_length[4096];
                 int err =
-                    get_header_value(request, "Content-Length", content_length);
+                    get_header_value(&request, "Content-Length", content_length);
                 if (err == -1) {
                     // if a post request doesn't contain content-length
                     write_http_400(nio);
@@ -481,16 +517,18 @@ void serve(char *buf, size_t size, nio_t *nio) {
                 write_http_400(nio);
             }
         }
+        /*
         char connection_status[MAX_LINE];
         get_header_value(request, CONNECTION_STR, connection_status);
         if (strncasecmp(connection_status, CLOSE, strlen(CLOSE)) == 0) {
             nio->rclosed = true;
             return;
         }
+         */
     } else {
         // parse error
         write_http_400(nio);
-        nio->rclosed = true;
+        // nio->rclosed = true;
         return;
     }
 }
