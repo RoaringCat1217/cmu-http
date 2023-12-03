@@ -25,6 +25,8 @@ ssize_t nio_readb(nio_t *nio, vector_t *usrbuf);
 ssize_t nio_readline(nio_t *nio, vector_t *line);
 // write as much as possible to fd
 ssize_t nio_writeb(nio_t *nio, const uint8_t *usrbuf, size_t size);
+// append some backs to the write buffer
+ssize_t nio_writeb_pushback(nio_t *nio, const uint8_t *usrbuf, size_t size)
 // NOT responsible to close the fd!!!
 void nio_free(nio_t *nio);
 

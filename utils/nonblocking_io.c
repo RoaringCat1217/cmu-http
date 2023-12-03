@@ -93,6 +93,12 @@ ssize_t nio_writeb(nio_t *nio, const uint8_t *usrbuf, size_t size) {
     return 0;
 }
 
+ssize_t nio_writeb_pushback(nio_t *nio, const uint8_t *usrbuf, size_t size) {
+    if (usrbuf != NULL && size > 0)
+        vector_push_back(&nio->wbuf, usrbuf, size);
+    return 0;
+}
+
 void nio_free(nio_t *nio) {
     vector_free(&nio->rbuf);
     vector_free(&nio->wbuf);

@@ -167,7 +167,7 @@ void write_http_400(nio_t *nio) {
 
     if (serialize_http_response(&msg, &len, BAD_REQUEST, NULL, NULL, NULL, 0,
                                 NULL) == TEST_ERROR_NONE) {
-        vector_push_back(&nio->wbuf, (uint8_t *)msg, len);
+        nio_writeb_pushback(nio, (uint8_t *)msg, len);
     }
 }
 
@@ -177,7 +177,7 @@ void write_http_404(nio_t *nio) {
 
     if (serialize_http_response(&msg, &len, NOT_FOUND, NULL, NULL, NULL, 0,
                                 NULL) == TEST_ERROR_NONE) {
-        vector_push_back(&nio->wbuf, (uint8_t *)msg, len);
+        nio_writeb_pushback(nio, (uint8_t *)msg, len);
     }
 }
 
@@ -187,7 +187,7 @@ void write_http_503(nio_t *nio) {
 
     if (serialize_http_response(&msg, &len, SERVICE_UNAVAILABLE, NULL, NULL,
                                 NULL, 0, NULL) == TEST_ERROR_NONE) {
-        vector_push_back(&nio->wbuf, (uint8_t *)msg, len);
+        nio_writeb_pushback(nio, (uint8_t *)msg, len);
     }
 }
 
