@@ -363,8 +363,9 @@ void write_http_503(nio_t *nio, bool instant) {
 
 int get_header_value(Request request, char *header_name, char *header_value) {
     for (int i = 0; i < request.header_count; i++) {
-        if (strcmp(request.headers[i].header_name, header_name) == 0) {
-            // ignore the leading zero
+        if (strncasecmp(request.headers[i].header_name, header_name,
+                        strlen(header_name)) == 0) {
+            // ignore the leading space
             strcpy(header_value, request.headers[i].header_value + 1);
             return 0;
         }
@@ -407,8 +408,6 @@ void serve(char *buf, size_t size, nio_t *nio) {
                 if (file_fd > 0) {
                     fileset_insert(&fileset, request.http_uri, file_path);
                 }
-            } else {
-                printf("found\n");
             }
 
             if (file_fd < 0) {
@@ -468,7 +467,7 @@ void serve(char *buf, size_t size, nio_t *nio) {
         }
         char connection_status[MAX_LINE];
         get_header_value(request, CONNECTION_STR, connection_status);
-        if (strcmp(connection_status, CLOSE) == 0) {
+        if (strncasecmp(connection_status, CLOSE, strlen(CLOSE)) == 0) {
             nio->rclosed = true;
             return;
         }
