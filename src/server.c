@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -116,7 +117,7 @@ int main(int argc, char *argv[]) {
 
         for (int i = 0; i < conncount + 1; i++) {
             // handle client drop
-            if ((fds[i].revents & POLLHUP) || (fds[i].revents & POLLERR)) {
+            if (fds[i].revents & POLLHUP || fds[i].revents & POLLERR) {
                 int fd = fds[i].fd;
                 fds[i] = fds[conncount];
                 i--;
@@ -190,6 +191,7 @@ void write_http_400(nio_t *nio) {
     if (serialize_http_response(&msg, &len, BAD_REQUEST, NULL, NULL, NULL, 0,
                                 NULL) == TEST_ERROR_NONE) {
         nio_writeb_pushback(nio, (uint8_t *)msg, len);
+        free(msg);
     }
 }
 
@@ -200,6 +202,7 @@ void write_http_404(nio_t *nio) {
     if (serialize_http_response(&msg, &len, NOT_FOUND, NULL, NULL, NULL, 0,
                                 NULL) == TEST_ERROR_NONE) {
         nio_writeb_pushback(nio, (uint8_t *)msg, len);
+        free(msg);
     }
 }
 
@@ -214,6 +217,7 @@ void write_http_503(nio_t *nio, bool instant) {
         } else {
             nio_writeb_pushback(nio, (uint8_t *)msg, len);
         }
+        free(msg);
     }
 }
 
@@ -245,18 +249,48 @@ void serve(char *buf, size_t size, nio_t *nio) {
     test_error_code_t error_code = parse_http_request(buf, size, &request);
 
     if (error_code == TEST_ERROR_NONE && request.valid) {
-        int file_fd = fileset_find(&fileset, request.http_uri);
-        if (file_fd == -1) {
-            // file not found
-            write_http_404(nio);
-        } else {
-            if (strcmp(request.http_method, GET) == 0) {
+        if (strcmp(request.http_method, GET) == 0 ||
+            strcmp(request.http_method, HEAD) == 0) {
+            int file_fd = fileset_find(&fileset, request.http_uri);
+            if (file_fd == -1) {
+                // file not found
+                write_http_404(nio);
+            } else {
+                if (strcmp(request.http_method, GET) == 0) {
+                    // get file length
+                    int file_len = lseek(file_fd, 0, SEEK_END);
+                    // get mapping
+                    char *addr = mmap(NULL, file_len, PROT_READ, MAP_PRIVATE,
+                                      file_fd, 0);
+                    char *data = malloc(file_len); // data stores file content
+                    memcpy(data, addr, file_len);  // copy file content
 
-            } else if (strcmp(request.http_method, HEAD) == 0) {
+                    munmap(addr, file_len);
 
-            } else if (strcmp(request.http_method, POST) == 0) {
-                nio_writeb_pushback(nio, (uint8_t *)buf, size);
+                    char *msg;
+                    size_t len;
+
+                    if (serialize_http_response(&msg, &len, OK, NULL, NULL,
+                                                NULL, file_len,
+                                                data) == TEST_ERROR_NONE) {
+                        nio_writeb_pushback(nio, (uint8_t *)msg, len);
+                        free(msg);
+                    }
+                    free(data);
+                } else {
+                    char *msg;
+                    size_t len;
+
+                    if (serialize_http_response(&msg, &len, OK, NULL, NULL,
+                                                NULL, 0,
+                                                NULL) == TEST_ERROR_NONE) {
+                        nio_writeb_pushback(nio, (uint8_t *)msg, len);
+                        free(msg);
+                    }
+                }
             }
+        } else if (strcmp(request.http_method, POST) == 0) {
+            nio_writeb_pushback(nio, (uint8_t *)buf, size);
         }
     } else {
         // parse error
