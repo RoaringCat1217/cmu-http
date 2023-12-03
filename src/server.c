@@ -392,6 +392,10 @@ void serve(char *buf, size_t size, nio_t *nio) {
         if (strcmp(request.http_method, GET) == 0 ||
             strcmp(request.http_method, HEAD) == 0) {
             printf("%s\n", request.http_uri);
+            size_t uri_len = strlen(request.http_uri);
+            if (request.http_uri[uri_len - 1] == '/') {
+                strcpy(request.http_uri + uri_len, "index.html");
+            }
             int file_fd = fileset_find(&fileset, request.http_uri);
             if (file_fd == -1) {
                 // file not found
@@ -442,6 +446,11 @@ void serve(char *buf, size_t size, nio_t *nio) {
             } else {
                 nio_writeb_pushback(nio, (uint8_t *)buf, size);
             }
+        }
+        char connection_status[MAX_LINE];
+        get_header_value(request, "connection", connection_status);
+        if (strcpy(connection_status, "close") == 0) {
+            nio->rclosed = true;
         }
     } else {
         // parse error
