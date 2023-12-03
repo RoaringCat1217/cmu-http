@@ -250,7 +250,7 @@ int main(int argc, char *argv[]) {
     fds[0].revents = 0;
 
     // Signal(SIGPIPE, sigpipe_handler);
-
+    sleep(5);
     while (1) {
         int ret = poll(fds, conncount + 1, -1);
         if (ret < 0) {
@@ -506,12 +506,12 @@ void serve(char *buf, size_t size, nio_t *nio) {
             write_http_400(nio);
             return;
         }
-        // char header_val[MAX_LINE];
-        // get_header_value(request, CONNECTION_STR, header_val);
-        // if (strcmp(header_val, CLOSE) == 0) {
-        //     nio->rclosed = true;
-        //     return;
-        // }
+        char header_val[MAX_LINE];
+        get_header_value(request, CONNECTION_STR, header_val);
+        if (strcmp(header_val, CLOSE) == 0) {
+            nio->rclosed = true;
+            return;
+        }
     } else {
         // parse error
         write_http_400(nio);
