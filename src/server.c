@@ -252,7 +252,7 @@ int main(int argc, char *argv[]) {
         int tail = conncount;
         for (int i = 0; i <= tail; i++) {
             // handle client drop
-            if ((fds[i].revents & POLLERR)) {
+            if ((fds[i].revents & POLLHUP) ||(fds[i].revents & POLLERR)) {
                 int fd = fds[i].fd;
                 nio_free(&routine_data_arr[i].nio);
                 vector_free(&routine_data_arr[i].req_buf);
