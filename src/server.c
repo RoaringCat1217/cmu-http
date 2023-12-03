@@ -403,6 +403,11 @@ void serve(char *buf, size_t size, nio_t *nio) {
                 char file_path[MAX_LINE];
                 sprintf(file_path, "%s%s", fileset.root, request.http_uri);
                 file_fd = open(file_path, O_RDONLY);
+                if (file_fd > 0) {
+                    fileset_insert(&fileset, request.http_uri, file_path);
+                }
+            } else {
+                printf("found\n");
             }
 
             if (file_fd < 0) {
