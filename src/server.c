@@ -413,12 +413,29 @@ void write_http_503(nio_t *nio) {
     }
 }
 
+void trim(char *string) {
+    size_t len = strlen(string);
+    int i, j;
+    for (i = 0; i < len; i++)
+        if (string[i] != ' ')
+            break;
+    for (j = i; j < len; j++)
+        if (string[j] == ' ' || string[j] == '\0')
+            break;
+    string[j] = '\0';
+    memmove(string, &string[i], strlen(&string[i]));
+}
+
 int get_header_value(Request *request, char *header_name, char *header_value) {
+    char buf1[MAX_LINE], buf2[MAX_LINE];
+    strcpy(buf1, header_name);
+    trim(buf1);
     for (int i = 0; i < request->header_count; i++) {
-        if (strncasecmp(request->headers[i].header_name, header_name,
-                        strlen(header_name)) == 0) {
-            // ignore the leading space
-            strcpy(header_value, request->headers[i].header_value + 1);
+        strcpy(buf2, request->headers[i].header_name);
+        trim(buf2);
+        if (strcasecmp(buf2, buf1) == 0) {
+            strcpy(header_value, request->headers[i].header_value);
+            trim(header_value);
             return 0;
         }
     }

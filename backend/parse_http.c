@@ -101,10 +101,6 @@ test_error_code_t parse_http_request(char *buffer, size_t size, Request *request
 		if (yyparse() == SUCCESS) {
             request->valid = true;
             Request_header *header = &request->headers[request->header_count];
-            trim_whitespace(header->header_name, strlen(header->header_name));
-            to_lower(header->header_name, strlen(header->header_name));
-            trim_whitespace(header->header_value, strlen(header->header_value));
-            to_lower(header->header_value, strlen(header->header_value));
             return TEST_ERROR_NONE;
 		}
         return TEST_ERROR_PARSE_FAILED;
