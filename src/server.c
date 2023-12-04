@@ -353,12 +353,8 @@ int main(int argc, char *argv[]) {
                     // continue to read data
                     fds[i].events &= (~POLLOUT);
                     fds[i].events |= POLLIN;
-                } else if (routine_data_arr[i].nio.rclosed) {
-                    // continue to write data
-                    fds[i].events &= (~POLLIN);
-                    fds[i].events |= POLLOUT;
                 } else {
-                    fds[i].events |= POLLIN;
+                    fds[i].events &= (~POLLIN);
                     fds[i].events |= POLLOUT;
                 }
             }
