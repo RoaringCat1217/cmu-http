@@ -419,7 +419,7 @@ void trim(char *string) {
         if (string[j] == ' ' || string[j] == '\0')
             break;
     string[j] = '\0';
-    memmove(string, &string[i], strlen(&string[i]));
+    memmove(string, &string[i], strlen(&string[i]) + 1);
 }
 
 int get_header_value(Request *request, char *header_name, char *header_value) {
