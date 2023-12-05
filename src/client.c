@@ -16,6 +16,8 @@
 #include <arpa/inet.h>
 #include <poll.h>
 #include <errno.h>
+#include <pthread.h>
+#include <fcntl.h>
 
 #include <parse_http.h>
 #include <test_error.h>
@@ -24,12 +26,15 @@
 #include "net_helper.h"
 #include "rio.h"
 #include "nonblocking_io.h"
+#include "file_dependency.h"
 
 #define MAX_LINE 1024
 #define BUF_SIZE 8192
 #define CONNECTION_TIMEOUT 50
 
 #define N_THREADS 8
+
+const char path[] = "./www/";
 
 typedef struct {
     int id;
@@ -118,29 +123,121 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "usage: %s <server-ip>\n", argv[0]);
         return EXIT_FAILURE;
     }
-    
-    /* Set up a connection to the HTTP server */
-    int http_sock;
-    struct sockaddr_in http_server;
-    if ((http_sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        return TEST_ERROR_HTTP_CONNECT_FAILED;
-    }
-    http_server.sin_family = AF_INET;
-    http_server.sin_port = htons(HTTP_PORT);
-    inet_pton(AF_INET, argv[1], &(http_server.sin_addr));
-    
-    fprintf(stderr, "Parsed IP address of the server: %X\n", htonl(http_server.sin_addr.s_addr));
 
-    if (connect (http_sock, (struct sockaddr *)&http_server, sizeof(http_server)) < 0){
-        return TEST_ERROR_HTTP_CONNECT_FAILED;
-    }
+    const char *hostname = argv[1];
+    char port[MAX_LINE];
+    sprintf(port, "%d", HTTP_PORT);
 
     // pipe_fds[i][j][k]:
     // i: thread id
     // j: 0 for worker read master write, 1 for master read worker write
     // k: 0 for read, 1 for write
     int pipe_fds[N_THREADS][2][2];
+    for (int i = 0; i < N_THREADS; i++) {
+        pipe(pipe_fds[i][0]);
+        pipe(pipe_fds[i][1]);
+    }
 
-    /* CP1: Send out a HTTP request, waiting for the response */
+    // thread args
+    args_t args[N_THREADS];
+    for (int i = 0; i < N_THREADS; i++) {
+        args[i].id = i;
+        args[i].rmaster_fd = pipe_fds[i][0][0];
+        args[i].wmaster_fd = pipe_fds[i][1][1];
+        args[i].hostname = hostname;
+        args[i].port = port;
+    }
 
+    // rios and fds, used to communicate with workers
+    rio_t rio[N_THREADS];
+    for (int i = 0; i < N_THREADS; i++)
+        rio_readinitb(&rio[i], pipe_fds[i][1][0]);
+    struct pollfd read_fds[N_THREADS];
+    for (int i = 0; i < N_THREADS; i++) {
+        read_fds[i].fd = pipe_fds[i][1][0];
+        read_fds[i].events = POLLIN | POLLHUP | POLLERR;
+    }
+    int write_fds[N_THREADS];
+    for (int i = 0; i < N_THREADS; i++)
+        write_fds[i] = pipe_fds[i][0][1];
+
+    // launch threads
+    pthread_t threads[N_THREADS];
+    for (int i = 0; i < N_THREADS; i++)
+        pthread_create(&threads[i], NULL, thread, (void *)&args[i]);
+
+    dependency_graph_t graph;
+    graph_init(&graph);
+    // next thread to assign a task to
+    int next_thread = 0;
+    // no need to send "\0" here. rio_readlineb will append \0 automatically
+    rio_writen(write_fds[next_thread], "dependency.csv\n", strlen("dependency.csv\n"));
+    next_thread = (next_thread + 1) % N_THREADS;
+    int nreceive = 0;
+    bool finished = false;
+
+    while (true) {
+        int ret = poll(read_fds, N_THREADS, CONNECTION_TIMEOUT);
+        if (ret < 0) {
+            fprintf(stderr, "poll: %d, %s\n", errno, strerror(errno));
+            exit(1);
+        }
+        for (int i = 0; i < N_THREADS; i++) {
+            if ((read_fds[i].revents & POLLHUP) || (read_fds[i].revents & POLLERR)) {
+                fprintf(stderr, "thread %d exited unexpectedly\n", i);
+                exit(1);
+            }
+            if (read_fds[i].revents & POLLIN) {
+                char filename[MAX_LINE];
+                ssize_t nread = rio_readlineb(&rio[i], filename, MAX_LINE);
+                // trim '\n'
+                filename[nread - 1] = '\0';
+                if (strcmp(filename, "dependency.csv") == 0) {
+                    // read dependency file
+                    int fd = open("./www/dependency.csv", O_RDONLY);
+                    char line[MAX_LINE], key[MAX_LINE], val[MAX_LINE];
+                    rio_t csv_io;
+                    rio_readinitb(&csv_io, fd);
+                    while (rio_readlineb(&csv_io, line, MAX_LINE) > 0) {
+                        key[0] = '\0';
+                        val[0] = '\0';
+                        sscanf(line, "%[^,],%s", val, key);
+                        graph_insert(&graph, key, val);
+                    }
+                    // request files with no dependency
+                    key_file_t *node = graph_find(&graph, "");
+                    for (value_file_t *val_file = node->values; val_file != NULL; val_file = val_file->next) {
+                        sprintf(line, "%s\n", val_file->filename);
+                        rio_writen(write_fds[next_thread], line, strlen(line));
+                        next_thread = (next_thread + 1) % N_THREADS;
+                    }
+                } else {
+                    nreceive++;
+                    if (nreceive == graph.nfiles) {
+                        finished = true;
+                        break;
+                    }
+                    key_file_t *node = graph_find(&graph, filename);
+                    char line[MAX_LINE];
+                    for (value_file_t *val_file = node->values; val_file != NULL; val_file = val_file->next) {
+                        sprintf(line, "%s\n", val_file->filename);
+                        rio_writen(write_fds[next_thread], line, strlen(line));
+                        next_thread = (next_thread + 1) % N_THREADS;
+                    }
+                }
+            }
+        }
+        if (finished)
+            break;
+    }
+
+    // join threads
+    for (int i = 0; i < N_THREADS; i++) {
+        close(rio[i].rio_fd);
+        close(write_fds[i]);
+    }
+    for (int i = 0; i < N_THREADS; i++)
+        pthread_join(threads[i], NULL);
+
+    return 0;
 }
