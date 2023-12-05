@@ -23,9 +23,6 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "dstring.h"
@@ -151,7 +148,8 @@ int routine(routine_data_t *routine_data) {
                 }
                 // headers are valid, check Keep-Alive
                 char conn_status[MAX_LINE];
-                get_header_value(&routine_data->request, CONNECTION_STR, conn_status);
+                get_header_value(&routine_data->request, CONNECTION_STR,
+                                 conn_status);
                 if (strncasecmp(conn_status, CLOSE, strlen(CLOSE)) == 0)
                     routine_data->close_conn = true;
 
@@ -166,7 +164,8 @@ int routine(routine_data_t *routine_data) {
                         routine_data->state = 2;
                         continue;
                     }
-                } else if (strcmp(routine_data->request.http_method, POST) == 0) {
+                } else if (strcmp(routine_data->request.http_method, POST) ==
+                           0) {
                     // POST, need to receive body
                     char content_length[4096];
                     if (get_header_value(&routine_data->request,
@@ -292,7 +291,7 @@ int main(int argc, char *argv[]) {
         int tail = conncount;
         for (int i = 0; i <= tail; i++) {
             // handle client drop
-            if ((fds[i].revents & POLLHUP) ||(fds[i].revents & POLLERR)) {
+            if ((fds[i].revents & POLLHUP) || (fds[i].revents & POLLERR)) {
                 int fd = fds[i].fd;
                 nio_free(&routine_data_arr[i].nio);
                 fds[i].fd = -1; // mark as deleted
@@ -330,8 +329,7 @@ int main(int argc, char *argv[]) {
 
                     // allocate space for a new routine_data
                     routine_data_arr[tail].state = 0;
-                    nio_init(&routine_data_arr[tail].nio,
-                             fds[tail].fd);
+                    nio_init(&routine_data_arr[tail].nio, fds[tail].fd);
                     routine(&routine_data_arr[tail]);
                 }
             } else if (fds[i].revents & POLLIN) {
@@ -452,7 +450,9 @@ test_error_code_t parse_header(char *buf, size_t size, Request *request) {
 
 void serve(routine_data_t *routine_data) {
     Request request;
-    test_error_code_t error_code = parse_http_request((char *)routine_data->req_buf.data, routine_data->req_buf.size, &request);
+    test_error_code_t error_code =
+        parse_http_request((char *)routine_data->req_buf.data,
+                           routine_data->req_buf.size, &request);
 
     if (error_code == TEST_ERROR_NONE && request.valid) {
         if (strcmp(request.http_version, HTTP_VER) != 0) {
@@ -517,13 +517,14 @@ void serve(routine_data_t *routine_data) {
                 }
             } else if (strcmp(request.http_method, POST) == 0) {
                 char content_length[4096];
-                int err =
-                    get_header_value(&request, "Content-Length", content_length);
+                int err = get_header_value(&request, "Content-Length",
+                                           content_length);
                 if (err == -1) {
                     // if a post request doesn't contain content-length
                     write_http_400(&routine_data->nio);
                 } else {
-                    nio_writeb(&routine_data->nio, routine_data->req_buf.data, routine_data->req_buf.size);
+                    nio_writeb(&routine_data->nio, routine_data->req_buf.data,
+                               routine_data->req_buf.size);
                 }
             } else {
                 write_http_400(&routine_data->nio);
