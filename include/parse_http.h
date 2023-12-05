@@ -109,4 +109,9 @@ test_error_code_t serialize_http_response(char **msg, size_t *len,
     const char *prepopulated_headers, char *content_type, char *content_length, 
     char *last_modified, size_t body_len, char *body);
 
+test_error_code_t parse_http_response(const char *buf, size_t len,
+                                      int *status_code,
+                                      Request_header **headers, int *header_count,
+                                      char *body, size_t *body_len);
+
 #endif
