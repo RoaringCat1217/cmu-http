@@ -34,7 +34,7 @@
 #define BUF_SIZE 8192
 #define CONNECTION_TIMEOUT 50
 
-#define N_CONNS 8
+#define N_CONNS 1
 
 #define YIELD 0
 #define FINISH 1
@@ -71,6 +71,9 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "usage: %s <server-ip>\n", argv[0]);
         return EXIT_FAILURE;
     }
+
+    strcpy(hostname, argv[1]);
+    sprintf(port, "%d", HTTP_PORT);
 
     // create ./www/ directory
     if (mkdir(save_path, 0777) < 0 && errno != EEXIST) {
@@ -258,6 +261,7 @@ int routine(routine_data_t *data, bool terminate) {
     while (true) {
         if (data->state == 0) {
             // initialize
+            printf("routine: entered state 0\n");
             vector_init(&data->resp_buf);
             vector_init(&data->file_buf);
             data->response.headers = NULL;
@@ -268,6 +272,7 @@ int routine(routine_data_t *data, bool terminate) {
 
         if (data->state == 1) {
             // free resources
+            printf("routine: entered state 1\n");
             vector_free(&data->resp_buf);
             vector_free(&data->file_buf);
             if (data->response.headers != NULL) {
@@ -282,6 +287,7 @@ int routine(routine_data_t *data, bool terminate) {
         }
 
         if (data->state == 2) {
+            printf("routine: entered state 2\n");
             // received one file
             data->nrecv++;
             // clean up structures, then read the next server response
@@ -300,6 +306,7 @@ int routine(routine_data_t *data, bool terminate) {
         }
 
         if (data->state == 3) {
+            printf("routine: entered state 3\n");
             // read the first line of response
             ssize_t nread =
                     nio_readline(&data->nio, &data->resp_buf);
@@ -314,6 +321,7 @@ int routine(routine_data_t *data, bool terminate) {
         }
 
         if (data->state == 4) {
+            printf("routine: entered state 4\n");
             // read headers
             ssize_t nread = nio_readline(&data->nio, &data->resp_buf);
             if (nread == 0) {
@@ -330,14 +338,18 @@ int routine(routine_data_t *data, bool terminate) {
                     data->state = 2;
                     continue;
                 }
+                vector_push_back(&data->resp_buf, (uint8_t *)"\0", 1);
+                printf("\n%s\n\n", (char *)data->resp_buf.data);
                 data->state = 5;
                 continue;
             }
         }
 
         if (data->state == 5) {
+            printf("routine: entered state 5\n");
             // receiving body
             size_t nleft = data->response.body_size - data->file_buf.size;
+            printf("nleft=%lu\n", nleft);
             ssize_t nread = nio_readb(&data->nio, &data->file_buf, nleft);
             if (nread == 0) {
                 data->state = 1;
