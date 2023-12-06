@@ -34,7 +34,7 @@
 #define BUF_SIZE 8192
 #define CONNECTION_TIMEOUT 50
 
-#define N_CONNS 1
+#define N_CONNS 8
 
 #define YIELD 0
 #define FINISH 1
