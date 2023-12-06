@@ -108,6 +108,71 @@ test_error_code_t parse_http_request(char *buffer, size_t size, Request *request
 	return TEST_ERROR_PARSE_PARTIAL;
 }
 
+test_error_code_t parse_http_response(char *buffer, size_t size, Response *response) {
+    response->header_count = 0;
+    response->status_header_size = 0;
+    response->allocated_headers = 15;
+    response->headers = (Request_header *) malloc(sizeof(Request_header) * response->allocated_headers);
+
+    char buf[8192];
+    memset(buf, 0, 8192);
+
+    char *loc = strstr(buffer, "\r\n");
+    if (loc == NULL) {
+        return TEST_ERROR_PARSE_FAILED;
+    }
+    int i = 0;
+    for (char *start = buffer; start < loc; start++) {
+        buf[i++] = *start;
+    }
+    buf[i] = '\0';
+
+    sscanf(buf, "%s %s %s", response->http_version, response->status_code, response->staus_text);
+    if (strcmp("response->status_code", "200") != 0) {
+        return TEST_ERROR_NONE;
+    }
+
+    i += 2;
+
+    int content_len = 0;
+    loc = strstr(buffer + i, "\r\n");
+    while (loc != (buffer + i)) {
+        memset(buf, 0, 8192);
+
+        int index = 0;
+        for (char *start = buffer + i; start < loc; start++) {
+            buf[index++] = *start;
+            if (index >= 8192) {
+                return TEST_ERROR_PARSE_FAILED;
+            }
+        }
+        buf[index] = '\0';
+
+        sscanf(buf, "%s %s", response->headers[response->header_count].header_name, response->headers[response->header_count].header_value);
+        response->headers[response->header_count].header_name[strlen(response->headers[response->header_count].header_name) - 1] = '\0';
+        if (strcasecmp(response->headers[response->header_count].header_name, "content-length") == 0) {
+            content_len = atoi(response->headers[response->header_count].header_value);
+        }
+
+        i += index;
+        i += 2;
+        response->header_count++;
+
+        loc = strstr(buffer + i, "\r\n");
+    }
+
+    if (content_len <= 0) {
+        return TEST_ERROR_NONE;
+    }
+
+    loc += 2;
+    response->body = malloc(sizeof(char) * (content_len + 1));
+    memcpy(response->body, loc, content_len);
+    response->body[content_len] = '\0';
+
+    return TEST_ERROR_NONE;
+}
+
 /**
  * Given a request returns the serialized char* buffer
  */

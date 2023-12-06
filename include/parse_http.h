@@ -62,6 +62,19 @@ typedef struct {
     bool valid;                 //!< Whether the request is valid
 } Request;
 
+typedef struct {
+    char http_version[50];      //!< HTTP version, should be 1.1 in this project
+    char status_code[50];
+    char staus_text[50];
+    Request_header *headers;    //!< HTTP headers, could be Content-Length, Connection, etc.
+    int header_count;           //!< Number of headers
+    size_t allocated_headers;   //!< Number of headers allocated
+    size_t status_header_size;  //!< Size of the status line and headers
+    char *body;                 //!< HTTP body, could be the content of the file
+    size_t *body_size;
+    bool valid;                 //!< Whether the request is valid
+} Response;
+
 // functions decalred in parser.y
 int yyparse();
 void set_parsing_options(char *buf, size_t i, Request *request);
@@ -109,9 +122,6 @@ test_error_code_t serialize_http_response(char **msg, size_t *len,
     const char *prepopulated_headers, char *content_type, char *content_length, 
     char *last_modified, size_t body_len, char *body);
 
-test_error_code_t parse_http_response(const char *buf, size_t len,
-                                      int *status_code,
-                                      Request_header **headers, int *header_count,
-                                      char *body, size_t *body_len);
+test_error_code_t parse_http_response(char *buffer, size_t size, Response *response);
 
 #endif
