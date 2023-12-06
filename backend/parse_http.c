@@ -113,6 +113,7 @@ test_error_code_t parse_http_response(char *buffer, size_t size, Response *respo
     response->status_header_size = 0;
     response->allocated_headers = 15;
     response->headers = (Request_header *) malloc(sizeof(Request_header) * response->allocated_headers);
+    response->valid = true;
 
     char buf[8192];
     memset(buf, 0, 8192);
@@ -128,7 +129,7 @@ test_error_code_t parse_http_response(char *buffer, size_t size, Response *respo
     buf[i] = '\0';
 
     sscanf(buf, "%s %s %s", response->http_version, response->status_code, response->staus_text);
-    if (strcmp("response->status_code", "200") != 0) {
+    if (strcmp(response->status_code, "200") != 0) {
         return TEST_ERROR_NONE;
     }
 
@@ -143,6 +144,7 @@ test_error_code_t parse_http_response(char *buffer, size_t size, Response *respo
         for (char *start = buffer + i; start < loc; start++) {
             buf[index++] = *start;
             if (index >= 8192) {
+                response->valid = false;
                 return TEST_ERROR_PARSE_FAILED;
             }
         }
@@ -165,10 +167,8 @@ test_error_code_t parse_http_response(char *buffer, size_t size, Response *respo
         return TEST_ERROR_NONE;
     }
 
-    loc += 2;
-    response->body = malloc(sizeof(char) * (content_len + 1));
-    memcpy(response->body, loc, content_len);
-    response->body[content_len] = '\0';
+    response->body = NULL;
+    response->body_size = content_len;
 
     return TEST_ERROR_NONE;
 }

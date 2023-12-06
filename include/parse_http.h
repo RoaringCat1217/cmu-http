@@ -71,7 +71,7 @@ typedef struct {
     size_t allocated_headers;   //!< Number of headers allocated
     size_t status_header_size;  //!< Size of the status line and headers
     char *body;                 //!< HTTP body, could be the content of the file
-    size_t *body_size;
+    size_t body_size;
     bool valid;                 //!< Whether the request is valid
 } Response;
 
