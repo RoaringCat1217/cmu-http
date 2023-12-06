@@ -9,6 +9,7 @@
  * without the express permission of the 15-441/641 course staff.
  */
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -48,17 +49,20 @@ typedef struct {
     // initialize / free by the main loop
     nio_t nio;
     int state;
-    str_queue_t *tasks;
+    dependency_graph_t *graph;
+    str_queue_t *tasks;  // append new tasks to this queue
+    str_queue_t mytasks;  // stores sent by unresponded files
     int *nrecv;
     // initialize / free by the routine
     vector_t resp_buf;  // response headers
     vector_t file_buf;  // file responded by the server
+    Response response;
 } routine_data_t;
 
 void build_request(Request *request, const char *filename, const char *hostname);
-void send_request(nio_t *nio, const char *filename);
+void send_request(routine_data_t *conn, const char *filename);
 int routine(routine_data_t *data, bool terminate);
-bool init_routine(routine_data_t *conn, struct pollfd *pollfd, str_queue_t *tasks, int *nrecv);
+bool init_routine(routine_data_t *conn, struct pollfd *pollfd, dependency_graph_t *graph, str_queue_t *tasks, int *nrecv);
 void clean_routine(routine_data_t *conn);
 
 int main(int argc, char *argv[]) {
@@ -67,6 +71,16 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "usage: %s <server-ip>\n", argv[0]);
         return EXIT_FAILURE;
     }
+
+    // create ./www/ directory
+    if (mkdir(save_path, 0777) < 0 && errno != EEXIST) {
+        fprintf(stderr, "cannot create directory\n");
+        return EXIT_FAILURE;
+    }
+
+    // store file dependency
+    dependency_graph_t graph;
+    graph_init(&graph);
 
     // task queue
     str_queue_t tasks;
@@ -79,27 +93,23 @@ int main(int argc, char *argv[]) {
     routine_data_t conns[N_CONNS];
     struct pollfd pollfds[N_CONNS];
     for (int i = 0; i < N_CONNS; i++) {
-        if (!init_routine(&conns[i], &pollfds[i], &tasks, &nrecv)) {
+        if (!init_routine(&conns[i], &pollfds[i], &graph, &tasks, &nrecv)) {
             fprintf(stderr, "connection %d failed\n", i);
             exit(1);
         }
     }
 
-    // store file dependency
-    dependency_graph_t graph;
-    graph_init(&graph);
-
     // next connection to assign a task to
     int next_conn = 0;
 
     // request "dependency.csv"
-    send_request(&conns[next_conn].nio, "dependency.csv");
+    send_request(&conns[next_conn], "dependency.csv");
     next_conn = (next_conn + 1) % N_CONNS;
     if (conns[next_conn].nio.wbuf.size > 0)
         pollfds[next_conn].events |= POLLOUT;
 
     bool finished = false;
-    while (!finished) {
+    while (true) {
         int ret = poll(pollfds, N_CONNS, CONNECTION_TIMEOUT);
         if (ret < 0) {
             fprintf(stderr, "poll: %d, %s\n", errno, strerror(errno));
@@ -110,7 +120,7 @@ int main(int argc, char *argv[]) {
                 // connection terminated by server unexpectedly
                 clean_routine(&conns[i]);
                 // try to reconnect once
-                if (!init_routine(&conns[i], &pollfds[i], &tasks, &nrecv)) {
+                if (!init_routine(&conns[i], &pollfds[i], &graph, &tasks, &nrecv)) {
                     fprintf(stderr, "connection %d failed\n", i);
                     exit(1);
                 }
@@ -122,7 +132,7 @@ int main(int argc, char *argv[]) {
                     // server closed its read end unexpectedly
                     clean_routine(&conns[i]);
                     // try to reconnect once
-                    if (!init_routine(&conns[i], &pollfds[i], &tasks, &nrecv)) {
+                    if (!init_routine(&conns[i], &pollfds[i], &graph, &tasks, &nrecv)) {
                         fprintf(stderr, "connection %d failed\n", i);
                         exit(1);
                     }
@@ -151,7 +161,7 @@ int main(int argc, char *argv[]) {
                         // check if there are tasks to assign
                         while (tasks.size > 0) {
                             char *task = str_queue_pop(&tasks);
-                            send_request(&conns[next_conn].nio, task);
+                            send_request(&conns[next_conn], task);
                             free(task);
                             next_conn = (next_conn + 1) % N_CONNS;
                         }
@@ -181,13 +191,13 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
-void send_request(nio_t *nio, const char *filename) {
+void send_request(routine_data_t *conn, const char *filename) {
     Request request;
     build_request(&request, filename, hostname);
     char reqbuf[BUF_SIZE];
     size_t buf_size;
     serialize_http_request(reqbuf, &buf_size, &request);
-    nio_writeb(nio, (uint8_t *)reqbuf, buf_size);
+    nio_writeb(&conn->nio, (uint8_t *)reqbuf, buf_size);
     if (request.headers != NULL) {
         free(request.headers);
         request.headers = NULL;
@@ -196,6 +206,7 @@ void send_request(nio_t *nio, const char *filename) {
         free(request.body);
         request.body = NULL;
     }
+    str_queue_push(&conn->mytasks, filename);
 }
 
 void build_request(Request *request, const char *filename, const char *hostname) {
@@ -213,13 +224,15 @@ void build_request(Request *request, const char *filename, const char *hostname)
     request->valid = true;
 }
 
-bool init_routine(routine_data_t *conn, struct pollfd *pollfd, str_queue_t *tasks, int *nrecv) {
+bool init_routine(routine_data_t *conn, struct pollfd *pollfd, dependency_graph_t *graph, str_queue_t *tasks, int *nrecv) {
     int fd = open_clientfd(hostname, port);
     if (fd < 0)
         return false;
     nio_init(&conn->nio, fd);
     conn->state = 0;
+    conn->graph = graph;
     conn->tasks = tasks;
+    str_queue_init(&conn->mytasks);
     conn->nrecv = nrecv;
     pollfd->fd = fd;
     pollfd->events = POLLIN | POLLHUP | POLLERR;
@@ -232,16 +245,23 @@ void clean_routine(routine_data_t *conn) {
     routine(conn, true);
     close(conn->nio.fd);
     nio_free(&conn->nio);
+    str_queue_free(&conn->mytasks);
 }
 
 int routine(routine_data_t *data, bool terminate) {
-    if (terminate)
-        data->state = 1;
+    if (terminate) {
+        if (data->state != 1)
+            data->state = 1;
+        else
+            return FINISH;
+    }
     while (true) {
         if (data->state == 0) {
             // initialize
             vector_init(&data->resp_buf);
             vector_init(&data->file_buf);
+            data->response.headers = NULL;
+            data->response.body = NULL;
             data->state = 3;
             continue;
         }
@@ -250,20 +270,97 @@ int routine(routine_data_t *data, bool terminate) {
             // free resources
             vector_free(&data->resp_buf);
             vector_free(&data->file_buf);
+            if (data->response.headers != NULL) {
+                free(data->response.headers);
+                data->response.headers = NULL;
+            }
+            if (data->response.body != NULL) {
+                free(data->response.body);
+                data->response.body = NULL;
+            }
             return FINISH;
         }
 
         if (data->state == 2) {
+            // received one file
+            data->nrecv++;
             // clean up structures, then read the next server response
             vector_clear(&data->resp_buf);
             vector_clear(&data->file_buf);
+            if (data->response.headers != NULL) {
+                free(data->response.headers);
+                data->response.headers = NULL;
+            }
+            if (data->response.body != NULL) {
+                free(data->response.body);
+                data->response.body = NULL;
+            }
             data->state = 3;
             continue;
         }
 
         if (data->state == 3) {
-            // read server response
-            return YIELD;
+            // read the first line of response
+            ssize_t nread =
+                    nio_readline(&data->nio, &data->resp_buf);
+            if (nread == 0) {
+                data->state = 1;
+                continue;
+            }
+            if (nread == NOT_READY)
+                return YIELD;
+            data->state = 4;
+            continue;
+        }
+
+        if (data->state == 4) {
+            // read headers
+            ssize_t nread = nio_readline(&data->nio, &data->resp_buf);
+            if (nread == 0) {
+                data->state = 1;
+                continue;
+            }
+            if (nread == NOT_READY)
+                return YIELD;
+            if (nread == 2) {
+                // read \r\n
+                test_error_code_t err = parse_http_response((char *)data->resp_buf.data, data->resp_buf.size, &data->response);
+                if (err != TEST_ERROR_NONE || strcasecmp(data->response.staus_text, "ok") != 0) {
+                    free(str_queue_pop(&data->mytasks));
+                    data->state = 2;
+                    continue;
+                }
+                data->state = 5;
+                continue;
+            }
+        }
+
+        if (data->state == 5) {
+            // receiving body
+            size_t nleft = data->response.body_size - data->file_buf.size;
+            ssize_t nread = nio_readb(&data->nio, &data->file_buf, nleft);
+            if (nread == 0) {
+                data->state = 1;
+                continue;
+            }
+            if (data->file_buf.size < data->response.body_size)
+                return YIELD;
+            // received the entire file
+            char path_to_file[MAX_LINE];
+            char *filename = str_queue_pop(&data->mytasks);
+            sprintf(path_to_file, "%s%s", save_path, filename);
+            // write the file
+            int fd = open(path_to_file, O_WRONLY | O_CREAT | O_TRUNC);
+            rio_writen(fd, data->file_buf.data, data->file_buf.size);
+            close(fd);
+            // add new tasks to tasks
+            key_file_t *key = graph_find(data->graph, filename);
+            for (value_file_t *val = key->values; val != NULL; val = val->next)
+                str_queue_push(data->tasks, val->filename);
+            free(filename);
+
+            data->state = 2;
+            continue;
         }
     }
 }
