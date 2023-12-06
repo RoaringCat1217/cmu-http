@@ -178,6 +178,7 @@ test_error_code_t parse_http_response(char *buffer, size_t size, Response *respo
  */
 test_error_code_t serialize_http_request(char *buffer, size_t *size, Request *request) {
     memset(buffer, 0, HTTP_SIZE);
+    *size = 0;
     char* p = buffer;
     if (strcmp(request->http_method, GET) != 0) {
         return TEST_ERROR_PARSE_FAILED;
@@ -186,7 +187,7 @@ test_error_code_t serialize_http_request(char *buffer, size_t *size, Request *re
     p[strlen(request->http_method)] = ' ';
     p += strlen(request->http_method) + 1;
     *size += strlen(request->http_method) + 1;
-    
+
     memcpy(p, request->http_uri, strlen(request->http_uri));
     p[strlen(request->http_uri)] = ' ';
     p += strlen(request->http_uri) + 1;

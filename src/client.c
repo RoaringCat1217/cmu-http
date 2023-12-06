@@ -160,14 +160,13 @@ int main(int argc, char *argv[]) {
                         // received all files
                         finished = true;
                         break;
-                    } else {
-                        // check if there are tasks to assign
-                        while (tasks.size > 0) {
-                            char *task = str_queue_pop(&tasks);
-                            send_request(&conns[next_conn], task);
-                            free(task);
-                            next_conn = (next_conn + 1) % N_CONNS;
-                        }
+                    }
+                    // check if there are tasks to assign
+                    while (tasks.size > 0) {
+                        char *task = str_queue_pop(&tasks);
+                        send_request(&conns[next_conn], task);
+                        free(task);
+                        next_conn = (next_conn + 1) % N_CONNS;
                     }
                 }
             }
@@ -201,30 +200,13 @@ void send_request(routine_data_t *conn, const char *filename) {
     size_t buf_size;
     serialize_http_request(reqbuf, &buf_size, &request);
     nio_writeb(&conn->nio, (uint8_t *)reqbuf, buf_size);
-    if (request.headers != NULL) {
-        free(request.headers);
-        request.headers = NULL;
-    }
-    if (request.body != NULL) {
-        free(request.body);
-        request.body = NULL;
-    }
     str_queue_push(&conn->mytasks, filename);
 }
 
 void build_request(Request *request, const char *filename, const char *hostname) {
-    strcpy(request->http_version, HTTP_VER);
     strcpy(request->http_method, GET);
     sprintf(request->http_uri, "/%s", filename);
     strcpy(request->host, hostname);
-    request->allocated_headers = 15;
-    request->headers = (Request_header *) malloc(sizeof(Request_header) * request->allocated_headers);
-    strcpy(request->headers[0].header_name, "Connection");
-    strcpy(request->headers[0].header_value, "Keep-Alive");
-    request->header_count = 1;
-    request->status_header_size = 0;
-    request->body = NULL;
-    request->valid = true;
 }
 
 bool init_routine(routine_data_t *conn, struct pollfd *pollfd, dependency_graph_t *graph, str_queue_t *tasks, int *nrecv) {
@@ -289,7 +271,7 @@ int routine(routine_data_t *data, bool terminate) {
         if (data->state == 2) {
             printf("routine: entered state 2\n");
             // received one file
-            data->nrecv++;
+            (*data->nrecv)++;
             // clean up structures, then read the next server response
             vector_clear(&data->resp_buf);
             vector_clear(&data->file_buf);
@@ -339,7 +321,6 @@ int routine(routine_data_t *data, bool terminate) {
                     continue;
                 }
                 vector_push_back(&data->resp_buf, (uint8_t *)"\0", 1);
-                printf("\n%s\n\n", (char *)data->resp_buf.data);
                 data->state = 5;
                 continue;
             }
@@ -349,7 +330,6 @@ int routine(routine_data_t *data, bool terminate) {
             printf("routine: entered state 5\n");
             // receiving body
             size_t nleft = data->response.body_size - data->file_buf.size;
-            printf("nleft=%lu\n", nleft);
             ssize_t nread = nio_readb(&data->nio, &data->file_buf, nleft);
             if (nread == 0) {
                 data->state = 1;
@@ -367,8 +347,11 @@ int routine(routine_data_t *data, bool terminate) {
             close(fd);
             // add new tasks to tasks
             key_file_t *key = graph_find(data->graph, filename);
-            for (value_file_t *val = key->values; val != NULL; val = val->next)
-                str_queue_push(data->tasks, val->filename);
+            if (key != NULL) {
+                for (value_file_t *val = key->values; val != NULL; val = val->next) {
+                    str_queue_push(data->tasks, val->filename);
+                }
+            }
             free(filename);
 
             data->state = 2;

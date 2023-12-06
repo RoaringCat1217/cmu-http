@@ -52,11 +52,11 @@ ssize_t nio_readb(nio_t *nio, vector_t *usrbuf, ssize_t n) {
     ssize_t nread = nio_read(nio);
     if (nio->rbuf.size > 0) {
         if (n == -1)
-            nread = usrbuf->size;
-        else if (n < usrbuf->size)
+            nread = nio->rbuf.size;
+        else if (n < nio->rbuf.size)
             nread = n;
         else
-            nread = usrbuf->size;
+            nread = nio->rbuf.size;
         vector_push_back(usrbuf, nio->rbuf.data, nread);
         vector_pop_front(&nio->rbuf, nread);
     }

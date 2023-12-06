@@ -21,7 +21,7 @@ char *CLOSE = "close";
 /* Response Headers */
 char *CRLF = "\r\n";
 
-char *CONNECTION = "Connection:";
+char *CONNECTION = "Connection: ";
 char *CONNECTION_VAL = "Keep-Alive";
 
 char *SERVER = "Server: ";
