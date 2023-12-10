@@ -235,10 +235,12 @@ void clean_routine(routine_data_t *conn) {
 
 int routine(routine_data_t *data, bool terminate) {
     if (terminate) {
-        if (data->state != 1)
+        if (data->state != 1 && data->state != 0)
             data->state = 1;
-        else
+        else {
+            data->state = 1;
             return FINISH;
+        }
     }
     while (true) {
         if (data->state == 0) {
